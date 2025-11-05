@@ -249,14 +249,11 @@ cat("Percentage of outliers:", round(outlier_percent, 2), "%\n")
 dat <- dat %>%
   filter(annual_inc > 0 & annual_inc <= q_high)
 
-summary(dat)
-
-boxplot(dat$annual_inc)
-plot(dat$annual_inc)
-
-library(ggplot2)
-ggplot(dat, aes(x = annual_inc)) +
-  geom_histogram(bins = 100) +
-  scale_x_continuous(limits = c(0, 500000)) +
-  theme_minimal()
-
+# cap everything above 100% dti
+dat <- dat |> filter(dti <= 100)
+# cap delinq_2yrs at 10
+dat <- dat |> filter(delinq_2yrs <= 10)
+# cap inq_last_6mths at 6
+dat <- dat |> mutate(inq_last_6mths = pmin(inq_last_6mths, 6))
+#remove errors where open_account > total_acc
+dat <- dat |> filter(open_acc <= total_acc)
