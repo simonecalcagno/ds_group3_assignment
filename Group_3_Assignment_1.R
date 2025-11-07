@@ -257,3 +257,5 @@ dat <- dat |> filter(delinq_2yrs <= 10)
 dat <- dat |> mutate(inq_last_6mths = pmin(inq_last_6mths, 6))
 #remove errors where open_account > total_acc
 dat <- dat |> filter(open_acc <= total_acc)
+
+#comment
