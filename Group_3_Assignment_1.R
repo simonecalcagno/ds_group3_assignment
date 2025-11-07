@@ -76,6 +76,8 @@ dat <- dat %>% select(-any_of(c("sub_grade", "policy_code")))
 dat <- dat %>%
   mutate(is_joint = ifelse(application_type == "JOINT", 1, 0)) %>%
   select(-annual_inc_joint, -dti_joint, -verification_status_joint)
+dat <- dat %>% select(-is_joint)
+
 # keep information of joint application or not in the data
 # remove the variables with a lot of missing values (all joints) 
 
@@ -154,6 +156,8 @@ factor_cols <- c("term","grade","emp_length","home_ownership","verification_stat
 
 factor_cols <- intersect(factor_cols, names(dat))
 dat <- dat %>% mutate(across(all_of(factor_cols), as.factor))
+
+
 
 # ----- drop beacuase they have to check anyway when applying -------
 dat <- dat %>% select(-last_credit_pull_d)
@@ -249,13 +253,84 @@ cat("Percentage of outliers:", round(outlier_percent, 2), "%\n")
 dat <- dat %>%
   filter(annual_inc > 0 & annual_inc <= q_high)
 
-# cap everything above 100% dti
+# Use log income (often more linear):
+dat <- dat %>% mutate(annual_inc_log = log1p(annual_inc)) %>% select(-annual_inc)
+
+
+# cut everything above 100% dti
 dat <- dat |> filter(dti <= 100)
-# cap delinq_2yrs at 10
+# cut delinq_2yrs at 10
 dat <- dat |> filter(delinq_2yrs <= 10)
+
 # cap inq_last_6mths at 6
 dat <- dat |> mutate(inq_last_6mths = pmin(inq_last_6mths, 6))
 #remove errors where open_account > total_acc
 dat <- dat |> filter(open_acc <= total_acc)
 
-#comment
+# transform pub_rec into binary variable, keep binary variable and remove the origin variable
+dat <- dat %>%
+  mutate(pub_rec_flag = ifelse(pub_rec > 0, 1, 0))
+dat <- dat %>% select(-any_of("pub_rec"))
+
+
+# Create dummy variables for verification_status, instead of order them. so we can use it better in tree-models
+dummies <- dummyVars(" ~ verification_status", data = dat)
+verification_dummies <- predict(dummies, newdata = dat)
+
+# Add dummy columns to your dataset and remove origin variable
+dat <- cbind(dat, verification_dummies)
+dat <- dat %>% select(-any_of("verification_status"))
+
+# drop one dummy variable for each group to avoid perfect multicollinearity. the dropped ones ar then the reference category
+dat <- dat %>%
+# choose baselines: Not.Verified, other, RENT (adjust if needed)
+select(
+    -any_of(c("verification_status.Not Verified",
+              "purpose.other",
+              "home_ownership.RENT"))
+  )
+
+
+
+##################### train model ########################
+
+# 1) Make sure your base dataset is a data.frame
+dat <- as.data.frame(dat)
+
+
+# 2) Train/test split using indices
+idx <- createDataPartition(dat$int_rate, p = 0.8, list = FALSE)
+train <- dat[idx, , drop = FALSE]
+test  <- dat[-idx, , drop = FALSE]
+
+# 3) Confirm they’re data.frames
+stopifnot(is.data.frame(train), is.data.frame(test))
+# sanity checks
+stopifnot(!any(sapply(dat, is.character)))          # no character cols
+stopifnot(sum(is.na(dat$int_rate)) == 0)
+
+# 4) Fit the model
+model_lm <- lm(int_rate ~ ., data = train)
+summary(model_lm)
+
+# 5) Predict & evaluate
+pred <- predict(model_lm, newdata = test)
+mse  <- mean((test$int_rate - pred)^2)
+mse
+
+
+# lasso/ridge
+install.packages('glmnet')
+library(glmnet)
+x <- model.matrix(int_rate ~ ., data = train)[, -1]
+y <- train$int_rate
+cv <- cv.glmnet(x, y, alpha = 1)  # lasso; alpha=0 ridge; 0–1 elastic net
+sqrt(min(cv$cvm))   
+
+# xgboost
+install.packages('xgboost')
+library(xgboost)
+X <- model.matrix(int_rate ~ ., data = train)[, -1]
+y <- train$int_rate
+xgb <- xgboost(data = X, label = y, nrounds = 200, max_depth = 6, eta = 0.05, objective = "reg:squarederror")
+
