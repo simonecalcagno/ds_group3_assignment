@@ -260,6 +260,7 @@ dat <- dat %>% mutate(annual_inc_log = log1p(annual_inc)) %>% select(-annual_inc
 # cut everything above 100% dti
 dat <- dat |> filter(dti <= 100)
 # cut delinq_2yrs at 10
+# They can be data entry errors or rare outliers (e.g., a borrower with 25 late payments — almost never approved for a loan)
 dat <- dat |> filter(delinq_2yrs <= 10)
 
 # cap inq_last_6mths at 6
@@ -327,10 +328,24 @@ y <- train$int_rate
 cv <- cv.glmnet(x, y, alpha = 1)  # lasso; alpha=0 ridge; 0–1 elastic net
 sqrt(min(cv$cvm))   
 
+
 # xgboost
 install.packages('xgboost')
 library(xgboost)
 X <- model.matrix(int_rate ~ ., data = train)[, -1]
 y <- train$int_rate
-xgb <- xgboost(data = X, label = y, nrounds = 200, max_depth = 6, eta = 0.05, objective = "reg:squarederror")
+xgb <- xgboost(data = X, label = y, nrounds = 100, max_depth = 6, eta = 0.05, objective = "reg:squarederror")
+
+
+
+# random forest
+set.seed(1)
+rf_model <- ranger(
+  formula = int_rate ~ .,
+  data = dat,
+  num.trees = 500,
+  mtry = floor(sqrt(ncol(dat)-1)),
+  importance = "impurity",
+  respect.unordered.factors = "order"
+)
 
