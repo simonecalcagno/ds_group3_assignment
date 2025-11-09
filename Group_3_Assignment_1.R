@@ -334,3 +334,35 @@ X <- model.matrix(int_rate ~ ., data = train)[, -1]
 y <- train$int_rate
 xgb <- xgboost(data = X, label = y, nrounds = 200, max_depth = 6, eta = 0.05, objective = "reg:squarederror")
 
+# Create X_test matrix (exclude target variable)
+X_test <- model.matrix(int_rate ~ ., data = test)[, -1]
+
+# True target values
+y_test <- test$int_rate
+
+# Make predictions
+pred_xgb <- predict(xgb, newdata = X_test)
+
+# Root Mean Squared Error (RMSE)
+rmse_xgb <- sqrt(mean((y_test - pred_xgb)^2))
+
+# Mean Absolute Error (MAE)
+mae_xgb <- mean(abs(y_test - pred_xgb))
+
+# R-squared
+ss_total  <- sum((y_test - mean(y_test))^2)
+ss_res    <- sum((y_test - pred_xgb)^2)
+r2_xgb <- 1 - ss_res / ss_total
+
+# Print the results
+cat("XGBoost RMSE:", round(rmse_xgb, 3), "\n")
+cat("XGBoost MAE:", round(mae_xgb, 3), "\n")
+cat("XGBoost R²:", round(r2_xgb, 3), "\n")
+
+
+# xgboost on test data
+library(xgboost)
+X <- model.matrix(int_rate ~ ., data = test)[, -1]
+y <- test$int_rate
+xgb_test <- xgboost(data = X, label = y, nrounds = 200, max_depth = 6, eta = 0.05, objective = "reg:squarederror")
+
