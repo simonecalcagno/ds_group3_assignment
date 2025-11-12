@@ -292,77 +292,173 @@ select(
 
 
 
-##################### train model ########################
+##################### train & evaluate models ########################
 
-# 1) Make sure your base dataset is a data.frame
+set.seed(1)   # reproducible split, ok for assignment
+
+# Make sure dat is a data.frame and target present
 dat <- as.data.frame(dat)
-
-
-# 2) Train/test split using indices
-idx <- createDataPartition(dat$int_rate, p = 0.8, list = FALSE)
-train <- dat[idx, , drop = FALSE]
-test  <- dat[-idx, , drop = FALSE]
-
-# 3) Confirm they’re data.frames
-stopifnot(is.data.frame(train), is.data.frame(test))
-# sanity checks
-stopifnot(!any(sapply(dat, is.character)))          # no character cols
+stopifnot("int_rate" %in% names(dat))
 stopifnot(sum(is.na(dat$int_rate)) == 0)
 
-# 4) Fit the model
-model_lm <- lm(int_rate ~ ., data = train)
-summary(model_lm)
+# Helper functions
+mse  <- function(y, yhat) mean((y - yhat)^2)
+rmse <- function(y, yhat) sqrt(mse(y, yhat))
 
-# 5) Predict & evaluate
-pred <- predict(model_lm, newdata = test)
-mse  <- mean((test$int_rate - pred)^2)
-mse
+#---------------- 1) Validation Set Approach (train / test split) ---------------
 
+# use same style as cv_vsa lab: sample() on row indices
+n <- nrow(dat)
+train_idx <- sample(n, floor(0.8 * n))  # 80% train, 20% test
 
-# lasso/ridge
-install.packages('glmnet')
-library(glmnet)
-x <- model.matrix(int_rate ~ ., data = train)[, -1]
-y <- train$int_rate
-cv <- cv.glmnet(x, y, alpha = 1)  # lasso; alpha=0 ridge; 0–1 elastic net
-sqrt(min(cv$cvm))   
+train <- dat[train_idx, ]
+test  <- dat[-train_idx, ]
 
-# xgboost
-install.packages('xgboost')
-library(xgboost)
-X <- model.matrix(int_rate ~ ., data = train)[, -1]
-y <- train$int_rate
-xgb <- xgboost(data = X, label = y, nrounds = 200, max_depth = 6, eta = 0.05, objective = "reg:squarederror")
+y_train <- train$int_rate
+y_test  <- test$int_rate
 
-# Create X_test matrix (exclude target variable)
-X_test <- model.matrix(int_rate ~ ., data = test)[, -1]
+#---------------- 2) Model 1: Ordinary Least Squares (lm) -----------------------
 
-# True target values
-y_test <- test$int_rate
+# full linear model with all prepared predictors
+lm_fit <- lm(int_rate ~ ., data = train)
 
-# Make predictions
-pred_xgb <- predict(xgb, newdata = X_test)
+# Look at model (for interpretation in report)
+summary(lm_fit)
 
-# Root Mean Squared Error (RMSE)
-rmse_xgb <- sqrt(mean((y_test - pred_xgb)^2))
+# Training performance
+pred_train_lm <- predict(lm_fit, newdata = train)
+train_mse_lm  <- mse(y_train, pred_train_lm)
+train_rmse_lm <- rmse(y_train, pred_train_lm)
 
-# Mean Absolute Error (MAE)
-mae_xgb <- mean(abs(y_test - pred_xgb))
+# Test performance
+pred_test_lm <- predict(lm_fit, newdata = test)
+test_mse_lm  <- mse(y_test, pred_test_lm)
+test_rmse_lm <- rmse(y_test, pred_test_lm)
 
-# R-squared
-ss_total  <- sum((y_test - mean(y_test))^2)
-ss_res    <- sum((y_test - pred_xgb)^2)
-r2_xgb <- 1 - ss_res / ss_total
-
-# Print the results
-cat("XGBoost RMSE:", round(rmse_xgb, 3), "\n")
-cat("XGBoost MAE:", round(mae_xgb, 3), "\n")
-cat("XGBoost R²:", round(r2_xgb, 3), "\n")
+cat("Linear regression (OLS)\n")
+cat("  Train MSE :", round(train_mse_lm, 4),
+    "RMSE:", round(train_rmse_lm, 4), "\n")
+cat("  Test  MSE :", round(test_mse_lm, 4),
+    "RMSE:", round(test_rmse_lm, 4), "\n\n")
 
 
-# xgboost on test data
-library(xgboost)
-X <- model.matrix(int_rate ~ ., data = test)[, -1]
-y <- test$int_rate
-xgb_test <- xgboost(data = X, label = y, nrounds = 200, max_depth = 6, eta = 0.05, objective = "reg:squarederror")
+#---------------- 3) k-fold Cross-Validation for OLS (cv.glm) -------------------
 
+# follow cv_vsa lab: glm() + cv.glm()
+if (!require("boot")) {
+  install.packages("boot")
+  library(boot)
+} else {
+  library(boot)
+}
+
+# glm with same formula as lm (fit on full data, cv.glm will re-split)
+glm_ols <- glm(int_rate ~ ., data = dat)
+
+# e.g. 5-fold CV (you can also try K=10)
+set.seed(1)
+cv_out_ols <- cv.glm(dat, glm_ols, K = 5)
+
+# cv.glm() returns delta: [1]=raw CV MSE, [2]=adjusted CV MSE
+cv_mse_ols  <- cv_out_ols$delta[2]
+cv_rmse_ols <- sqrt(cv_mse_ols)
+
+cat("OLS (glm) k-fold CV:\n")
+cat("  CV MSE  :", round(cv_mse_ols, 4),
+    "RMSE:", round(cv_rmse_ols, 4), "\n\n")
+
+
+#---------------- 4) Model 2: Ridge & 3: LASSO (glmnet) -------------------------
+
+if (!require("glmnet")) {
+  install.packages("glmnet")
+  library(glmnet)
+} else {
+  library(glmnet)
+}
+
+# model.matrix like in ridge/lasso lab: remove intercept column
+X_train <- model.matrix(int_rate ~ ., data = train)[, -1]
+X_test  <- model.matrix(int_rate ~ ., data = test)[, -1]
+
+#---- Ridge (alpha = 0) ----
+set.seed(1)
+cv_ridge <- cv.glmnet(X_train, y_train, alpha = 0)  # default 10-fold CV
+
+lambda_ridge <- cv_ridge$lambda.min
+
+# training & test predictions at best lambda
+pred_train_ridge <- predict(cv_ridge, s = lambda_ridge, newx = X_train)
+pred_test_ridge  <- predict(cv_ridge, s = lambda_ridge, newx = X_test)
+
+train_mse_ridge  <- mse(y_train, pred_train_ridge)
+train_rmse_ridge <- rmse(y_train, pred_train_ridge)
+test_mse_ridge   <- mse(y_test,  pred_test_ridge)
+test_rmse_ridge  <- rmse(y_test,  pred_test_ridge)
+
+# CV-MSE is stored in cv_ridge$cvm (vector over lambdas)
+idx_ridge <- which(cv_ridge$lambda == lambda_ridge)
+cv_mse_ridge  <- cv_ridge$cvm[idx_ridge]
+cv_rmse_ridge <- sqrt(cv_mse_ridge)
+
+cat("Ridge regression (alpha = 0)\n")
+cat("  Best lambda:", signif(lambda_ridge, 3), "\n")
+cat("  Train RMSE :", round(train_rmse_ridge, 4), "\n")
+cat("  Test  RMSE :", round(test_rmse_ridge, 4), "\n")
+cat("  CV    RMSE :", round(cv_rmse_ridge, 4), "\n\n")
+
+
+#---- LASSO (alpha = 1) ----
+set.seed(1)
+cv_lasso <- cv.glmnet(X_train, y_train, alpha = 1)
+
+lambda_lasso <- cv_lasso$lambda.min
+
+pred_train_lasso <- predict(cv_lasso, s = lambda_lasso, newx = X_train)
+pred_test_lasso  <- predict(cv_lasso, s = lambda_lasso, newx = X_test)
+
+train_mse_lasso  <- mse(y_train, pred_train_lasso)
+train_rmse_lasso <- rmse(y_train, pred_train_lasso)
+test_mse_lasso   <- mse(y_test,  pred_test_lasso)
+test_rmse_lasso  <- rmse(y_test,  pred_test_lasso)
+
+idx_lasso <- which(cv_lasso$lambda == lambda_lasso)
+cv_mse_lasso  <- cv_lasso$cvm[idx_lasso]
+cv_rmse_lasso <- sqrt(cv_mse_lasso)
+
+cat("LASSO regression (alpha = 1)\n")
+cat("  Best lambda:", signif(lambda_lasso, 3), "\n")
+cat("  Train RMSE :", round(train_rmse_lasso, 4), "\n")
+cat("  Test  RMSE :", round(test_rmse_lasso, 4), "\n")
+cat("  CV    RMSE :", round(cv_rmse_lasso, 4), "\n\n")
+
+
+#---------------- 5) Put all errors into one comparison table -------------------
+
+error_matrix <- data.frame(
+  Model   = c("OLS (lm)",   "Ridge",           "LASSO"),
+  TrainRMSE = c(train_rmse_lm, train_rmse_ridge, train_rmse_lasso),
+  TestRMSE  = c(test_rmse_lm,  test_rmse_ridge,  test_rmse_lasso),
+  CV_RMSE   = c(cv_rmse_ols,   cv_rmse_ridge,    cv_rmse_lasso)
+)
+
+print(error_matrix)
+
+# From this table you can:
+# - decide which model has the lowest TestRMSE (VSA)
+# - double-check with CV_RMSE (more stable)
+# Typically you'll pick the model with lowest test error as your "winner".
+
+
+#---------------- 6) Train final model on full data for deployment --------------
+
+# Example: if LASSO is best, refit on all rows of dat:
+
+X_full <- model.matrix(int_rate ~ ., data = dat)[, -1]
+y_full <- dat$int_rate
+
+set.seed(1)
+best_lasso_full <- cv.glmnet(X_full, y_full, alpha = 1)
+
+# Save final model for Reality Check script
+saveRDS(best_lasso_full, file = "best_model_lasso.rds")
