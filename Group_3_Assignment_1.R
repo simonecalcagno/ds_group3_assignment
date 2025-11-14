@@ -25,6 +25,21 @@ if(!require('caret')) {
 raw <- read_delim("LCdata.csv",
                   delim = ";",       # <-- semicolon is the eliminator
                   na = c("", "NA","N/A"))  # handle "", "NA" and "N/A" as missing values
+set.seed(123)
+
+# ---------------- Reserve 200 rows for Reality Check ----------------
+
+# raw = your original dataset as read from CSV
+
+reality_idx <- sample(1:nrow(raw), 200)
+
+reality_raw  <- raw[reality_idx,  ]   # untouched data for RC
+dat_model    <- raw[-reality_idx, ]   # used for data prep + model training
+
+# Replace 'raw' with 'dat_model' for all following preprocessing steps
+raw <- dat_model
+
+set.seed(1)
 
 
 # Drop attributes not available for new applications, because they won’t exist at prediction time
@@ -432,6 +447,172 @@ cat("  Train RMSE :", round(train_rmse_lasso, 4), "\n")
 cat("  Test  RMSE :", round(test_rmse_lasso, 4), "\n")
 cat("  CV    RMSE :", round(cv_rmse_lasso, 4), "\n\n")
 
+################ 7) Regression Trees (tree package) #################
+
+if (!require("tree")) {
+  install.packages("tree")
+  library(tree)
+} else {
+  library(tree)
+}
+
+#--- 7.1 Fit a regression tree with ALL predictors (default stop) ---
+
+# Fix column names for tree() and glm()
+names(train) <- make.names(names(train))
+names(test)  <- make.names(names(test))
+train_tree <- train
+test_tree  <- test
+names(train_tree) <- make.names(names(train_tree))
+names(test_tree)  <- make.names(names(test_tree))
+# 2) Drop factor predictors with > 32 levels (tree() limitation)
+is_fac      <- sapply(train_tree, is.factor)
+fac_levels  <- sapply(train_tree[, is_fac, drop = FALSE], nlevels)
+many_levels <- names(fac_levels[fac_levels > 32])
+
+many_levels  # just to see which ones (e.g. addr_state)
+
+# Remove these high-cardinality factors ONLY for tree models
+train_tree <- train_tree[, !(names(train_tree) %in% many_levels), drop = FALSE]
+test_tree  <- test_tree[,  !(names(test_tree)  %in% many_levels),  drop = FALSE]
+
+# Quick sanity check: no characters left
+stopifnot(!any(sapply(train_tree, is.character)))
+stopifnot("int_rate" %in% names(train_tree))
+# Same idea as: tree(Salary ~ ., data = Ht_nonas.train) from the lab
+tree_full <- tree(int_rate ~ ., data = train_tree)
+
+summary(tree_full)    # for report: number of terminal nodes, deviance, etc.
+
+# Optional plots (good for the PDF report)
+plot(tree_full)
+text(tree_full, cex = 0.7)
+
+# Training RMSE (exactly like in the tree lab)
+tree_full_train_RMSE <- sqrt(summary(tree_full)$dev / summary(tree_full)$df)
+
+# Test RMSE (follow lab style: deviance = RSS over test, divide by df from training)
+tree_full_pred <- predict(tree_full, newdata = test)
+
+tree_full_test_dev  <- sum((tree_full_pred - y_test)^2)
+tree_full_test_MSE  <- tree_full_test_dev / summary(tree_full)$df
+tree_full_test_RMSE <- sqrt(tree_full_test_MSE)
+
+cat("Tree (default stop):\n")
+cat("  Train RMSE:", round(tree_full_train_RMSE, 4), "\n")
+cat("  Test  RMSE:", round(tree_full_test_RMSE, 4), "\n\n")
+
+
+#--- 7.2 Cost–complexity pruning with cv.tree() --------------------
+
+# This is exactly the pattern from the tree lab: cv.tree() + prune.tree()
+set.seed(1)
+cv_tree_full <- cv.tree(tree_full)   # default: K = 10
+
+# Quick inspection & plot (for your report)
+cv_tree_full
+
+par(mfrow = c(1, 2))
+plot(cv_tree_full$size, cv_tree_full$dev, type = "b",
+     xlab = "Number of terminal nodes", ylab = "Deviance")
+plot(cv_tree_full$k, cv_tree_full$dev, type = "b",
+     xlab = "Alpha (cost-complexity)", ylab = "Deviance")
+par(mfrow = c(1, 1))
+
+# Choose the tree size with minimal deviance
+best_idx   <- which.min(cv_tree_full$dev)
+best_size  <- cv_tree_full$size[best_idx]
+best_alpha <- cv_tree_full$k[best_idx]
+
+cat("Pruning:\n")
+cat("  Best size :", best_size, "\n")
+cat("  Best alpha:", signif(best_alpha, 3), "\n\n")
+
+# Prune tree to best_size
+tree_pruned <- prune.tree(tree_full, best = best_size)
+
+summary(tree_pruned)
+
+# Optional: plot pruned tree
+plot(tree_pruned)
+text(tree_pruned, cex = 0.7)
+
+# Training RMSE of pruned tree
+tree_pruned_train_RMSE <- sqrt(summary(tree_pruned)$dev / summary(tree_pruned)$df)
+
+# Test RMSE of pruned tree
+tree_pruned_pred <- predict(tree_pruned, newdata = test)
+
+tree_pruned_test_dev  <- sum((tree_pruned_pred - y_test)^2)
+tree_pruned_test_MSE  <- tree_pruned_test_dev / summary(tree_pruned)$df
+tree_pruned_test_RMSE <- sqrt(tree_pruned_test_MSE)
+
+cat("Tree (pruned):\n")
+cat("  Train RMSE:", round(tree_pruned_train_RMSE, 4), "\n")
+cat("  Test  RMSE:", round(tree_pruned_test_RMSE, 4), "\n\n")
+
+
+#--- 7.3 Add trees to your comparison table -----------------------
+
+# assuming you already have error_matrix from the lm/ridge/lasso part:
+#   columns: Model, TrainRMSE, TestRMSE, CV_RMSE
+
+tree_rows <- data.frame(
+  Model     = c("Tree (default)", "Tree (pruned)"),
+  TrainRMSE = c(tree_full_train_RMSE, tree_pruned_train_RMSE),
+  TestRMSE  = c(tree_full_test_RMSE,  tree_pruned_test_RMSE),
+  CV_RMSE   = c(NA, NA)   # we used cv.tree dev plot qualitatively
+)
+
+error_matrix <- rbind(error_matrix, tree_rows)
+
+print(error_matrix)
+
+################ 8) XGBoost (gradient boosting trees) ################
+
+if (!require("xgboost")) {
+  install.packages("xgboost")
+  library(xgboost)
+} else {
+  library(xgboost)
+}
+
+# X_train and X_test come from the glmnet section:
+# X_train <- model.matrix(int_rate ~ ., data = train)[, -1]
+# X_test  <- model.matrix(int_rate ~ ., data = test)[, -1]
+
+set.seed(1)
+
+xgb_fit <- xgboost(
+  data      = X_train,
+  label     = y_train,
+  nrounds   = 200,                # number of boosting rounds
+  max_depth = 6,                  # tree depth
+  eta       = 0.05,               # learning rate
+  objective = "reg:squarederror", # for regression
+  verbose   = 0
+)
+
+# Predictions
+pred_train_xgb <- predict(xgb_fit, newdata = X_train)
+pred_test_xgb  <- predict(xgb_fit, newdata = X_test)
+
+# Errors
+train_rmse_xgb <- rmse(y_train, pred_train_xgb)
+test_rmse_xgb  <- rmse(y_test,  pred_test_xgb)
+
+cat("XGBoost:\n")
+cat("  Train RMSE:", round(train_rmse_xgb, 4), "\n")
+cat("  Test  RMSE:", round(test_rmse_xgb, 4), "\n\n")
+
+# Add XGBoost row to comparison table
+xgb_row <- data.frame(
+  Model     = "XGBoost",
+  TrainRMSE = train_rmse_xgb,
+  TestRMSE  = test_rmse_xgb,
+  CV_RMSE   = NA   # we didn't run k-fold CV for xgboost here
+)
+error_matrix <- rbind(error_matrix, xgb_row)
 
 #---------------- 5) Put all errors into one comparison table -------------------
 
@@ -450,15 +631,34 @@ print(error_matrix)
 # Typically you'll pick the model with lowest test error as your "winner".
 
 
-#---------------- 6) Train final model on full data for deployment --------------
+#---------------- 6) Train final XGBoost model on FULL data ----------------
 
-# Example: if LASSO is best, refit on all rows of dat:
+library(xgboost)
 
-X_full <- model.matrix(int_rate ~ ., data = dat)[, -1]
+# Sanity check: no raw character columns left
+stopifnot(!any(sapply(dat, is.character)))
+stopifnot("int_rate" %in% names(dat))
+
+# 1) Build numeric design matrix with model.matrix (handles factors properly)
+X_full <- model.matrix(int_rate ~ ., data = dat)[, -1]  # drop intercept
 y_full <- dat$int_rate
 
+# 2) Fit XGBoost on the full preprocessed data
 set.seed(1)
-best_lasso_full <- cv.glmnet(X_full, y_full, alpha = 1)
+best_xgb_full <- xgboost(
+  data      = X_full,
+  label     = y_full,
+  nrounds   = 200,                # use the same hyperparameters as in your comparison
+  max_depth = 6,
+  eta       = 0.05,
+  objective = "reg:squarederror",
+  verbose   = 0
+)
 
-# Save final model for Reality Check script
-saveRDS(best_lasso_full, file = "best_model_lasso.rds")
+# 3) Save model AND the feature names for the Reality Check script
+xgb_deploy <- list(
+  model         = best_xgb_full,
+  feature_names = colnames(X_full)  # important for new data
+)
+
+saveRDS(xgb_deploy, file = "best_model_xgb.rds")
