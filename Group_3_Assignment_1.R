@@ -298,6 +298,8 @@ select(
 # 1) Make sure your base dataset is a data.frame
 dat <- as.data.frame(dat)
 
+names(dat) <- make.names(names(dat))  # make names safe for formula interfaces (Random Froest)
+
 
 # 2) Train/test split using indices
 idx <- createDataPartition(dat$int_rate, p = 0.8, list = FALSE)
@@ -315,37 +317,133 @@ model_lm <- lm(int_rate ~ ., data = train)
 summary(model_lm)
 
 # 5) Predict & evaluate
-pred <- predict(model_lm, newdata = test)
-mse  <- mean((test$int_rate - pred)^2)
-mse
+pred_train <- predict(model_lm, newdata = train)
+mse_train  <- mean((train$int_rate - pred_train)^2)
+mse_train
 
+pred_test <- predict(model_lm, newdata = test)
+mse_test  <- mean((test$int_rate - pred_test)^2)
+mse_test
 
-# lasso/ridge
-install.packages('glmnet')
+rmse_lm <- sqrt(mse_test)
+rmse_lm
+
+mse_lm <- mse_test
+
+##### lasso
 library(glmnet)
-x <- model.matrix(int_rate ~ ., data = train)[, -1]
-y <- train$int_rate
-cv <- cv.glmnet(x, y, alpha = 1)  # lasso; alpha=0 ridge; 0–1 elastic net
-sqrt(min(cv$cvm))   
+x_train <- model.matrix(int_rate ~ ., data = train)[, -1]
+y_train <- train$int_rate
 
+cv <- cv.glmnet(x_train, y_train, alpha = 1)  # lasso
 
-# xgboost
-install.packages('xgboost')
+# RMSE from cross validation 
+rmse_lasso_cv <- sqrt(min(cv$cvm))
+
+# RMSE on test data
+x_test <- model.matrix(int_rate ~ ., data = test)[, -1]
+pred_lasso <- predict(cv, s = "lambda.min", newx = x_test)
+rmse_lasso <- sqrt(mean((test$int_rate - as.numeric(pred_lasso))^2))
+rmse_lasso
+mse_lasso <- mean((test$int_rate - as.numeric(pred_lasso))^2)
+mse_lasso
+
+##### xgboost
 library(xgboost)
-X <- model.matrix(int_rate ~ ., data = train)[, -1]
-y <- train$int_rate
-xgb <- xgboost(data = X, label = y, nrounds = 100, max_depth = 6, eta = 0.05, objective = "reg:squarederror")
+X_train <- model.matrix(int_rate ~ ., data = train)[, -1]
+y_train <- train$int_rate
 
+xgb <- xgboost(
+  data = X_train,
+  label = y_train,
+  nrounds = 300,
+  max_depth = 6,
+  eta = 0.05,
+  objective = "reg:squarederror",
+  verbose = 0
+)
+
+# prediction and RMSE on test
+X_test <- model.matrix(int_rate ~ ., data = test)[, -1]
+pred_xgb <- predict(xgb, newdata = X_test)
+rmse_xgb <- sqrt(mean((test$int_rate - pred_xgb)^2))
+rmse_xgb
+mse_xgb <- mean((test$int_rate - pred_xgb)^2)
+mse_xgb
 
 
 # random forest
+# Random Forest with ranger -----------------------------------------------
+
+if(!require(ranger)) install.packages("ranger"); library(ranger)
+if(!require(caret))  install.packages("caret");  library(caret)
+
 set.seed(1)
+
+# 1) make column names safe for formula interfaces
+names(dat) <- make.names(names(dat))
+
+
+# 3) build model (formula interface)
 rf_model <- ranger(
-  formula = int_rate ~ .,
-  data = dat,
-  num.trees = 500,
-  mtry = floor(sqrt(ncol(dat)-1)),
+  int_rate ~ .,
+  data = train,
+  num.trees = 300,
+  mtry = floor(sqrt(ncol(train) - 1)),
+  min.node.size = 5,
   importance = "impurity",
-  respect.unordered.factors = "order"
+  respect.unordered.factors = "order",
+  seed = 1
 )
+
+# 4) predict on test
+rf_pred <- predict(rf_model, data = test)$predictions
+
+# 5) metrics
+rmse_rf <- sqrt(mean((test$int_rate - rf_pred)^2))
+mae_rf  <- mean(abs(test$int_rate - rf_pred))
+ss_tot  <- sum((test$int_rate - mean(test$int_rate))^2)
+ss_res  <- sum((test$int_rate - rf_pred)^2)
+r2_rf   <- 1 - ss_res / ss_tot
+mse_rf  <- mean((test$int_rate - rf_pred)^2)
+
+cat("RF RMSE:", round(rmse_rf, 3), "\n")
+cat("RF MAE :", round(mae_rf, 3), "\n")
+cat("RF R2  :", round(r2_rf, 3), "\n")
+
+
+##### Results
+
+results <- data.frame(
+  Model = c("Linear regression",
+            "Lasso",
+            "XGBoost",
+            "Random forest"),
+  RMSE = c(
+    rmse_lm,
+    rmse_lasso,
+    rmse_xgb,
+    rmse_rf
+  )
+)
+
+results$RMSE <- round(results$RMSE, 3)
+print(results)
+
+
+results_mse <- data.frame(
+  Model = c("Linear regression",
+            "Lasso regression",
+            "XGBoost",
+            "Random Forest"),
+  MSE = c(mse_lm,
+          mse_lasso,
+          mse_xgb,
+          mse_rf)
+)
+
+results_mse$MSE <- round(results_mse$MSE, 3)
+print(results_mse)
+
+
 
