@@ -330,6 +330,7 @@ rmse_lm
 
 mse_lm <- mse_test
 
+
 ##### lasso
 library(glmnet)
 x_train <- model.matrix(int_rate ~ ., data = train)[, -1]
@@ -347,6 +348,7 @@ rmse_lasso <- sqrt(mean((test$int_rate - as.numeric(pred_lasso))^2))
 rmse_lasso
 mse_lasso <- mean((test$int_rate - as.numeric(pred_lasso))^2)
 mse_lasso
+  
 
 ##### xgboost
 library(xgboost)
@@ -370,6 +372,7 @@ rmse_xgb <- sqrt(mean((test$int_rate - pred_xgb)^2))
 rmse_xgb
 mse_xgb <- mean((test$int_rate - pred_xgb)^2)
 mse_xgb
+
 
 
 # random forest
