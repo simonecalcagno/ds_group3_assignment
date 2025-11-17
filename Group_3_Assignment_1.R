@@ -306,6 +306,15 @@ idx <- createDataPartition(dat$int_rate, p = 0.8, list = FALSE)
 train <- dat[idx, , drop = FALSE]
 test  <- dat[-idx, , drop = FALSE]
 
+#### define k-fold CV
+k <- 5  
+
+ctrl <- trainControl(
+  method = "cv",
+  number = k,
+  verboseIter = FALSE
+)
+
 # 3) Confirm they’re data.frames
 stopifnot(is.data.frame(train), is.data.frame(test))
 # sanity checks
@@ -330,16 +339,30 @@ rmse_lm
 
 mse_lm <- mse_test
 
+# CV on LM
+cv_lm <- train(
+  int_rate ~ .,
+  data = train,
+  method = "lm",
+  trControl = ctrl,
+  metric = "RMSE"
+)
+
+cv_rmse_lm <- cv_lm$results$RMSE[1]
+cv_mse_lm  <- cv_rmse_lm^2
+cv_mse_lm
+
 
 ##### lasso
 library(glmnet)
 x_train <- model.matrix(int_rate ~ ., data = train)[, -1]
 y_train <- train$int_rate
 
-cv <- cv.glmnet(x_train, y_train, alpha = 1)  # lasso
+
+#  cv <- cv.glmnet(x_train, y_train, alpha = 1)  # lasso
 
 # RMSE from cross validation 
-rmse_lasso_cv <- sqrt(min(cv$cvm))
+# rmse_lasso_cv <- sqrt(min(cv$cvm))
 
 # RMSE on test data
 x_test <- model.matrix(int_rate ~ ., data = test)[, -1]
@@ -348,7 +371,23 @@ rmse_lasso <- sqrt(mean((test$int_rate - as.numeric(pred_lasso))^2))
 rmse_lasso
 mse_lasso <- mean((test$int_rate - as.numeric(pred_lasso))^2)
 mse_lasso
-  
+
+
+#  CV on Lasso 
+cv_lasso <- train(
+  int_rate ~ .,
+  data = train,
+  method = "glmnet",
+  trControl = ctrl,
+  tuneLength = 10,     # caret chooses 10 lambdas
+  metric = "RMSE"
+)
+
+best_row_lasso <- cv_lasso$results[which.min(cv_lasso$results$RMSE), ]
+cv_rmse_lasso  <- best_row_lasso$RMSE
+cv_mse_lasso   <- cv_rmse_lasso^2
+cv_mse_lasso
+ 
 
 ##### xgboost
 library(xgboost)
@@ -358,7 +397,7 @@ y_train <- train$int_rate
 xgb <- xgboost(
   data = X_train,
   label = y_train,
-  nrounds = 300,
+  nrounds = 300,  # started with 100, 300 gave the better result, could be even a bit higher when taking more time
   max_depth = 6,
   eta = 0.05,
   objective = "reg:squarederror",
@@ -373,6 +412,21 @@ rmse_xgb
 mse_xgb <- mean((test$int_rate - pred_xgb)^2)
 mse_xgb
 
+
+# CV on XGBoost
+cv_xgb <- train(
+  int_rate ~ .,
+  data = train,
+  method = "xgbTree",
+  trControl = ctrl,
+  tuneLength = 3,       # small grid
+  metric = "RMSE"
+)
+
+best_row_xgb <- cv_xgb$results[which.min(cv_xgb$results$RMSE), ]
+cv_rmse_xgb  <- best_row_xgb$RMSE
+cv_mse_xgb   <- cv_rmse_xgb^2
+cv_mse_xgb
 
 
 # random forest
@@ -391,7 +445,7 @@ names(dat) <- make.names(names(dat))
 rf_model <- ranger(
   int_rate ~ .,
   data = train,
-  num.trees = 300,
+  num.trees = 300, # started with 100, 300 gave the better result
   mtry = floor(sqrt(ncol(train) - 1)),
   min.node.size = 5,
   importance = "impurity",
@@ -415,23 +469,25 @@ cat("RF MAE :", round(mae_rf, 3), "\n")
 cat("RF R2  :", round(r2_rf, 3), "\n")
 
 
-##### Results
 
-results <- data.frame(
-  Model = c("Linear regression",
-            "Lasso",
-            "XGBoost",
-            "Random forest"),
-  RMSE = c(
-    rmse_lm,
-    rmse_lasso,
-    rmse_xgb,
-    rmse_rf
-  )
+# CV on Random Forest
+cv_rf <- train(
+  int_rate ~ .,
+  data = train,
+  method = "ranger",
+  trControl = ctrl,
+  tuneLength = 5,      # try 5 combinations of mtry / min.node.size
+  importance = "impurity",
+  metric = "RMSE"
 )
 
-results$RMSE <- round(results$RMSE, 3)
-print(results)
+best_row_rf <- cv_rf$results[which.min(cv_rf$results$RMSE), ]
+cv_rmse_rf  <- best_row_rf$RMSE
+cv_mse_rf   <- cv_rmse_rf^2
+cv_mse_rf
+
+
+##### Results
 
 
 results_mse <- data.frame(
