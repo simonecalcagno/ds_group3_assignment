@@ -46,6 +46,8 @@ raw <- raw %>% mutate(reality_flag = 0L)
 idx_reality <- sample(nrow(raw), 200)
 raw$reality_flag[idx_reality] <- 1L
 
+set.seed(1)
+
 # ---------------------- Start preprocessing ----------------------
 # Everything below works on ALL rows, but later we split by reality_flag
 
