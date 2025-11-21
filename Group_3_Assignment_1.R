@@ -476,7 +476,7 @@ cv_rf <- train(
   data = train,
   method = "ranger",
   trControl = ctrl,
-  tuneLength = 5,      # try 5 combinations of mtry / min.node.size
+  tuneLength = 3,      # try 3 combinations of mtry / min.node.size
   importance = "impurity",
   metric = "RMSE"
 )
