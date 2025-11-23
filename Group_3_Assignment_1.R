@@ -440,3 +440,15 @@ rmse_reality_xgb <- sqrt(mse_reality_xgb)
 
 cat("XGB - Reality-check RMSE:", round(rmse_reality_xgb, 3), "\n")
 cat("XGB - Reality-check MSE :", round(mse_reality_xgb, 3), "\n")
+
+# ---------------------- Save best model (XGBoost) ----------------------
+
+best_model <- xgb   # XGBoost is our chosen model
+
+model_objects <- list(
+  model    = best_model,
+  features = colnames(X_train)  # the columns used for training the XGBoost model
+)
+
+saveRDS(model_objects, file = "best_model_assignment1.rds")
+
