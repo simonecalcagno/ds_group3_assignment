@@ -77,7 +77,8 @@ dat <- dat %>%
          -mths_since_last_delinq,
          -mths_since_last_record)
 
-# Drop derived/redundant variables
+# Drop derived/redundant variables, sub_grade is determined by grade therefore if you know grad information in sub_grade is redundant
+# also policy code is always 1 meaning no information for prediction
 dat <- dat %>% select(-any_of(c("sub_grade", "policy_code")))
 
 # Joint applications
