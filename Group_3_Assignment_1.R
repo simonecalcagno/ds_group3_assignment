@@ -43,7 +43,7 @@ raw <- read_delim("LCdata.csv",
 # These 200 will NOT be used for train/test/model selection
 set.seed(123)   # separate seed for reproducibility of the 200
 raw <- raw %>% mutate(reality_flag = 0L)
-idx_reality <- sample(nrow(raw), 200)
+idx_reality <- sample(nrow(raw), 1000)
 raw$reality_flag[idx_reality] <- 1L
 
 set.seed(1)
@@ -377,33 +377,37 @@ cat("RF MAE  (test):", round(mae_rf, 3), "\n")
 cat("RF R2   (test):", round(r2_rf, 3), "\n")
 cat("RF OOB RMSE   :", round(oob_rmse_rf, 3), "\n")
 
-# ---------------------- Results (test MSE) ----------------------
-results_mse <- data.frame(
+
+# ---------------------- Combined results table ----------------------
+
+results_all <- data.frame(
   Model = c("Linear regression",
             "Lasso regression",
             "XGBoost",
             "Random Forest"),
-  MSE = c(mse_lm,
-          mse_lasso,
-          mse_xgb,
-          mse_rf)
-)
-results_mse$MSE <- round(results_mse$MSE, 3)
-print(results_mse)
-
-# “CV-like” table (LM/Lasso/XGB via CV, RF via OOB)
-results_cv_like <- data.frame(
-  Model = c("Linear regression",
-            "Lasso regression",
-            "XGBoost",
-            "Random Forest (OOB)"),
+  
+  Train_MSE = c(mse_train_lm,
+                mse_train_lasso,
+                mse_train_xgb,
+                mse_train_rf),
+  
+  Test_MSE = c(mse_lm,
+               mse_lasso,
+               mse_xgb,
+               mse_rf),
+  
   CV_like_MSE = c(cv_mse_lm,
                   cv_mse_lasso,
                   cv_mse_xgb,
                   oob_mse_rf)
 )
-results_cv_like$CV_like_MSE <- round(results_cv_like$CV_like_MSE, 3)
-print(results_cv_like)
+
+results_all$Train_MSE   <- round(results_all$Train_MSE, 3)
+results_all$Test_MSE    <- round(results_all$Test_MSE, 3)
+results_all$CV_like_MSE <- round(results_all$CV_like_MSE, 3)
+
+print(results_all)
+
 
 # ---------------------- Reality-check evaluation ----------------------
 
