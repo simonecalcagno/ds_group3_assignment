@@ -43,7 +43,7 @@ raw <- read_delim("LCdata.csv",
 # These 200 will NOT be used for train/test/model selection
 set.seed(123)   # separate seed for reproducibility of the 200
 raw <- raw %>% mutate(reality_flag = 0L)
-idx_reality <- sample(nrow(raw), 200)
+idx_reality <- sample(nrow(raw), 1000)
 raw$reality_flag[idx_reality] <- 1L
 
 set.seed(1)
@@ -77,7 +77,8 @@ dat <- dat %>%
          -mths_since_last_delinq,
          -mths_since_last_record)
 
-# Drop derived/redundant variables
+# Drop derived/redundant variables, sub_grade is determined by grade therefore if you know grad information in sub_grade is redundant
+# also policy code is always 1 meaning no information for prediction
 dat <- dat %>% select(-any_of(c("sub_grade", "policy_code")))
 
 # Joint applications
@@ -293,6 +294,9 @@ y_train <- train$int_rate
 # cross-validated lasso
 cv <- cv.glmnet(x_train, y_train, alpha = 1)  # Lasso
 
+pred_train_lasso <- predict(cv, s = "lambda.min", newx = x_train)
+mse_train_lasso  <- mean((y_train - pred_train_lasso)^2)
+
 # Predictions on test
 x_test <- model.matrix(int_rate ~ ., data = test)[, -1]
 pred_lasso <- predict(cv, s = "lambda.min", newx = x_test)
@@ -326,22 +330,36 @@ xgb <- xgboost(
   verbose = 0
 )
 
+pred_train_xgb <- predict(xgb, newdata = X_train)
+mse_train_xgb  <- mean((y_train - pred_train_xgb)^2)
+
 X_test <- model.matrix(int_rate ~ ., data = test)[, -1]
 pred_xgb <- predict(xgb, newdata = X_test)
 mse_xgb  <- mean((test$int_rate - pred_xgb)^2)
 rmse_xgb <- sqrt(mse_xgb)
 
-# CV on XGBoost via caret
-cv_xgb <- train(
-  int_rate ~ .,
-  data = train,
-  method = "xgbTree",
-  trControl = ctrl,
-  tuneLength = 3,
-  metric = "RMSE"
+# ---------------------- Fast CV on XGBoost via xgb.cv ----------------------
+
+dtrain <- xgb.DMatrix(data = X_train, label = y_train)
+
+params <- list(
+  max_depth  = 6,
+  eta        = 0.05,
+  objective  = "reg:squarederror",
+  eval_metric = "rmse"
 )
-best_row_xgb <- cv_xgb$results[which.min(cv_xgb$results$RMSE), ]
-cv_rmse_xgb  <- best_row_xgb$RMSE
+
+xgb_cv <- xgb.cv(
+  params = params,
+  data   = dtrain,
+  nrounds = 300,     # same as your manual model
+  nfold   = k,       # k = 5 from your ctrl, or just 5
+  early_stopping_rounds = 20,
+  verbose = 2
+)
+
+best_iter    <- xgb_cv$best_iteration
+cv_rmse_xgb  <- xgb_cv$evaluation_log$test_rmse_mean[best_iter]
 cv_mse_xgb   <- cv_rmse_xgb^2
 
 # ---------------------- Random Forest (ranger) ----------------------
@@ -356,6 +374,9 @@ rf_model <- ranger(
   respect.unordered.factors = "order",
   seed = 1
 )
+
+rf_pred_train <- predict(rf_model, data = train)$predictions
+mse_train_rf  <- mean((train$int_rate - rf_pred_train)^2)
 
 # OOB error (MSE) from ranger
 oob_mse_rf  <- rf_model$prediction.error
@@ -376,38 +397,42 @@ cat("RF MAE  (test):", round(mae_rf, 3), "\n")
 cat("RF R2   (test):", round(r2_rf, 3), "\n")
 cat("RF OOB RMSE   :", round(oob_rmse_rf, 3), "\n")
 
-# ---------------------- Results (test MSE) ----------------------
-results_mse <- data.frame(
+
+# ---------------------- Combined results table ----------------------
+
+results_all <- data.frame(
   Model = c("Linear regression",
             "Lasso regression",
             "XGBoost",
             "Random Forest"),
-  MSE = c(mse_lm,
-          mse_lasso,
-          mse_xgb,
-          mse_rf)
-)
-results_mse$MSE <- round(results_mse$MSE, 3)
-print(results_mse)
-
-# “CV-like” table (LM/Lasso/XGB via CV, RF via OOB)
-results_cv_like <- data.frame(
-  Model = c("Linear regression",
-            "Lasso regression",
-            "XGBoost",
-            "Random Forest (OOB)"),
+  
+  Train_MSE = c(mse_train_lm,
+                mse_train_lasso,
+                mse_train_xgb,
+                mse_train_rf),
+  
+  Test_MSE = c(mse_lm,
+               mse_lasso,
+               mse_xgb,
+               mse_rf),
+  
   CV_like_MSE = c(cv_mse_lm,
                   cv_mse_lasso,
                   cv_mse_xgb,
                   oob_mse_rf)
 )
-results_cv_like$CV_like_MSE <- round(results_cv_like$CV_like_MSE, 3)
-print(results_cv_like)
+
+results_all$Train_MSE   <- round(results_all$Train_MSE, 3)
+results_all$Test_MSE    <- round(results_all$Test_MSE, 3)
+results_all$CV_like_MSE <- round(results_all$CV_like_MSE, 3)
+
+print(results_all)
+
 
 # ---------------------- Reality-check evaluation ----------------------
 
 
-# --- Example for XGBoost as best model ---
+# --- XGBoost as best model ---
 X_reality_xgb <- model.matrix(int_rate ~ ., data = reality_dat)[, -1]
 pred_reality_xgb <- predict(xgb, newdata = X_reality_xgb)
 mse_reality_xgb  <- mean((reality_dat$int_rate - pred_reality_xgb)^2)
@@ -415,3 +440,15 @@ rmse_reality_xgb <- sqrt(mse_reality_xgb)
 
 cat("XGB - Reality-check RMSE:", round(rmse_reality_xgb, 3), "\n")
 cat("XGB - Reality-check MSE :", round(mse_reality_xgb, 3), "\n")
+
+# ---------------------- Save best model (XGBoost) ----------------------
+
+best_model <- xgb   # XGBoost is our chosen model
+
+model_objects <- list(
+  model    = best_model,
+  features = colnames(X_train)  # the columns used for training the XGBoost model
+)
+
+saveRDS(model_objects, file = "best_model_assignment1.rds")
+
