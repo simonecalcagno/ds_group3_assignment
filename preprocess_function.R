@@ -1,3 +1,4 @@
+# Function to preprocess loan application data for prediction
 preprocess_lc <- function(raw) {
   # Make sure needed packages are loaded
   if (!requireNamespace("dplyr", quietly = TRUE)) stop("Please install dplyr")
