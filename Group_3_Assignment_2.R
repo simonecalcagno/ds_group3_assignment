@@ -226,7 +226,7 @@ history_simple <- model_simple %>% fit(
   x_train,
   y_train,
   epochs = 30,
-  batch_size = 128,
+  batch_size = 5016,
   validation_data = list(x_val, y_val),
   verbose = 1
 )
@@ -253,93 +253,81 @@ save_model(
 )
 
 ############################################
-# Convolutional neural network model
+# User defined deep neural network model
 ############################################
 
-# Keras expects an extra channel dimension for Conv1D
-# Here every feature is treated as a "time step" with one channel
-
-library(keras3)
-
-# Step C1 reshape input data for Conv1D
-# What  Add a channel dimension so that each sample has shape (features, 1)
-x_train_cnn <- array_reshape(x_train, c(nrow(x_train), ncol(x_train), 1))
-x_val_cnn   <- array_reshape(x_val,   c(nrow(x_val),   ncol(x_val),   1))
-x_test_cnn  <- array_reshape(x_test,  c(nrow(x_test),  ncol(x_test),  1))
-
-# Step C2 define number of classes
+# Determine number of classes
+# What  Use the unique labels in y for output units
 num_classes <- length(unique(y_num))
 
-# Step C3 build convolutional model
-# What  Use one dimensional convolutions over the feature dimension
+# Define the model architecture
+# What  Several dense layers with tanh and sigmoid activations plus dropout for regularization
 model_cnn <- keras_model_sequential() %>%
-  layer_conv_1d(
-    filters = 32,
-    kernel_size = 3,
-    activation = "relu",
-    input_shape = c(ncol(x_train), 1)
-  ) %>%
-  layer_conv_1d(
-    filters = 32,
-    kernel_size = 3,
-    activation = "relu"
-  ) %>%
-  layer_max_pooling_1d(pool_size = 2) %>%
-  
-  layer_conv_1d(
-    filters = 64,
-    kernel_size = 3,
-    activation = "relu"
-  ) %>%
-  layer_global_max_pooling_1d() %>%
-  
   layer_dense(
-    units = 64,
-    activation = "relu"
+    units = 128,
+    activation = "tanh",
+    input_shape = ncol(x_train)
   ) %>%
+  layer_dense(
+    units = 128,
+    activation = "sigmoid"
+  ) %>%
+  layer_dropout(rate = 0.1) %>%
+  layer_dense(
+    units = 128,
+    activation = "tanh"
+  ) %>%
+  layer_dropout(rate = 0.1) %>%
+  layer_dense(
+    units = 128,
+    activation = "sigmoid"
+  ) %>%
+  layer_dropout(rate = 0.1) %>%
   layer_dense(
     units = num_classes,
     activation = "softmax"
   )
 
-# Step C4 compile convolutional model
-# What  Use same loss and metric as before for fair comparison
+# Compile the model
+# What  Use Adam optimizer and sparse categorical crossentropy for integer encoded labels
 model_cnn %>% compile(
   optimizer = optimizer_adam(learning_rate = 0.001),
   loss      = "sparse_categorical_crossentropy",
   metrics   = "accuracy"
 )
 
+# Optional  show model summary
 summary(model_cnn)
 
-# Step C5 train convolutional model
-# What  Train model on reshaped data and monitor validation accuracy
+# Train the model
+# What  Fit the model on training data and monitor performance on validation set
 history_cnn <- model_cnn %>% fit(
-  x_train_cnn,
+  x_train,
   y_train,
-  epochs          = 200,
-  batch_size      = 128,
-  validation_data = list(x_val_cnn, y_val),
+  epochs          = 500,
+  batch_size      = 512,
+  validation_data = list(x_val, y_val),
   verbose         = 1
 )
 
-# Optional plot of training history
+# Optional  plot training history
 plot(history_cnn)
 
-# Step C6 evaluate convolutional model on test data
-# What  Compare test accuracy of convolutional model to dense models
+# Evaluate the model on test data
+# What  Test accuracy used to compare with other models
 test_results_cnn <- model_cnn %>% evaluate(
-  x_test_cnn,
+  x_test,
   y_test,
   verbose = 0
 )
 
 print(test_results_cnn)
 
-# Step C7 save convolutional model
+# Save the trained model
 save_model(
   model_cnn,
   overwrite = TRUE,
   "nn_cnn_assignment2.keras"
 )
+
 
