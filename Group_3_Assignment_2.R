@@ -253,99 +253,93 @@ save_model(
 )
 
 ############################################
-# Improved neural network model
-# Uses deeper architecture, batch normalization and dropout
+# Convolutional neural network model
 ############################################
 
-# Determine number of classes in case not yet defined
+# Keras expects an extra channel dimension for Conv1D
+# Here every feature is treated as a "time step" with one channel
+
+library(keras3)
+
+# Step C1 reshape input data for Conv1D
+# What  Add a channel dimension so that each sample has shape (features, 1)
+x_train_cnn <- array_reshape(x_train, c(nrow(x_train), ncol(x_train), 1))
+x_val_cnn   <- array_reshape(x_val,   c(nrow(x_val),   ncol(x_val),   1))
+x_test_cnn  <- array_reshape(x_test,  c(nrow(x_test),  ncol(x_test),  1))
+
+# Step C2 define number of classes
 num_classes <- length(unique(y_num))
 
-# Define improved model architecture
-# What  Three hidden layers with relu activations, batch normalization and dropout
-model_improved <- keras_model_sequential() %>%
-  layer_dense(
-    units = 128,
+# Step C3 build convolutional model
+# What  Use one dimensional convolutions over the feature dimension
+model_cnn <- keras_model_sequential() %>%
+  layer_conv_1d(
+    filters = 32,
+    kernel_size = 3,
     activation = "relu",
-    input_shape = ncol(x_train)
+    input_shape = c(ncol(x_train), 1)
   ) %>%
-  layer_batch_normalization() %>%
-  layer_dropout(rate = 0.2) %>%
+  layer_conv_1d(
+    filters = 32,
+    kernel_size = 3,
+    activation = "relu"
+  ) %>%
+  layer_max_pooling_1d(pool_size = 2) %>%
+  
+  layer_conv_1d(
+    filters = 64,
+    kernel_size = 3,
+    activation = "relu"
+  ) %>%
+  layer_global_max_pooling_1d() %>%
   
   layer_dense(
     units = 64,
     activation = "relu"
   ) %>%
-  layer_batch_normalization() %>%
-  layer_dropout(rate = 0.2) %>%
-  
-  layer_dense(
-    units = 32,
-    activation = "relu"
-  ) %>%
-  layer_batch_normalization() %>%
-  layer_dropout(rate = 0.1) %>%
-  
   layer_dense(
     units = num_classes,
     activation = "softmax"
   )
 
-# Compile improved model
-# What  Use Adam with a moderate learning rate and sparse categorical crossentropy
-model_improved %>% compile(
+# Step C4 compile convolutional model
+# What  Use same loss and metric as before for fair comparison
+model_cnn %>% compile(
   optimizer = optimizer_adam(learning_rate = 0.001),
   loss      = "sparse_categorical_crossentropy",
   metrics   = "accuracy"
 )
 
-# Show model summary
-summary(model_improved)
+summary(model_cnn)
 
-# Define callbacks
-# What  Early stopping prevents overfitting, ReduceLROnPlateau lowers learning rate when validation loss stops improving
-cb_early <- callback_early_stopping(
-  monitor           = "val_loss",
-  patience          = 6,
-  restore_best_weights = TRUE
-)
-
-cb_plateau <- callback_reduce_lr_on_plateau(
-  monitor  = "val_loss",
-  factor   = 0.5,
-  patience = 3,
-  min_lr   = 1e-5
-)
-
-# Train improved model
-# What  Train on training data and monitor performance on validation data
-history_improved <- model_improved %>% fit(
-  x_train,
+# Step C5 train convolutional model
+# What  Train model on reshaped data and monitor validation accuracy
+history_cnn <- model_cnn %>% fit(
+  x_train_cnn,
   y_train,
-  epochs          = 80,
+  epochs          = 200,
   batch_size      = 128,
-  validation_data = list(x_val, y_val),
-  callbacks       = list(cb_early, cb_plateau),
+  validation_data = list(x_val_cnn, y_val),
   verbose         = 1
 )
 
 # Optional plot of training history
-plot(history_improved)
+plot(history_cnn)
 
-# Evaluate improved model on test data
-# What  Test accuracy of improved model for comparison with simple model
-test_results_improved <- model_improved %>% evaluate(
-  x_test,
+# Step C6 evaluate convolutional model on test data
+# What  Compare test accuracy of convolutional model to dense models
+test_results_cnn <- model_cnn %>% evaluate(
+  x_test_cnn,
   y_test,
   verbose = 0
 )
 
-print(test_results_improved)
+print(test_results_cnn)
 
-# Save improved model
+# Step C7 save convolutional model
 save_model(
-  model_improved,
-  overwrite = TRUE, 
-  "nn_improved_assignment2.keras"
+  model_cnn,
+  overwrite = TRUE,
+  "nn_cnn_assignment2.keras"
 )
-
 
