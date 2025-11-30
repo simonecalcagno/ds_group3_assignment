@@ -84,7 +84,7 @@ preprocess_lc <- function(raw) {
   
   # ---------------------- Convert selected categoricals to factors ----------------------
   factor_cols <- c("term","grade","emp_length","home_ownership","verification_status",
-                   "purpose","addr_state","initial_list_status","application_type")
+                   "purpose","addr_state","application_type")
   factor_cols <- intersect(factor_cols, names(dat))
   dat <- dat %>% mutate(across(all_of(factor_cols), as.factor))
   

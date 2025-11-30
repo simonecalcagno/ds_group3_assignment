@@ -39,17 +39,7 @@ raw <- read_delim("LCdata.csv",
                   delim = ";",
                   na = c("", "NA","N/A"))
 
-# ---------------------- Mark 200 "reality-check" observations ----------------------
-# These 200 will NOT be used for train/test/model selection
-set.seed(123)   # separate seed for reproducibility of the 200
-raw <- raw %>% mutate(reality_flag = 0L)
-idx_reality <- sample(nrow(raw), 1000)
-raw$reality_flag[idx_reality] <- 1L
-
-set.seed(1)
-
 # ---------------------- Start preprocessing ----------------------
-# Everything below works on ALL rows, but later we split by reality_flag
 
 # Drop attributes not available for new applications
 drop_now <- c(
@@ -123,7 +113,7 @@ dat <- dat %>%
 
 # Convert selected categoricals to factors
 factor_cols <- c("term","grade","emp_length","home_ownership","verification_status",
-                 "purpose","addr_state","initial_list_status","application_type")
+                 "purpose","addr_state","application_type")
 
 factor_cols <- intersect(factor_cols, names(dat))
 dat <- dat %>% mutate(across(all_of(factor_cols), as.factor))
@@ -225,26 +215,27 @@ dat <- dat %>%
               "purpose.other",
               "home_ownership.RENT"))
   )
+# ---------------------- Reality-check split AFTER preprocessing ----------------------
+set.seed(123)
 
-# ---------------------- Split out reality set ----------------------
-# At this point, dat still contains 'reality_flag' from raw
+# Sample 1000 rows
+idx_reality <- sample(nrow(dat), 1000)
 
-# Keep reality rows separate
-reality_dat <- dat %>%
-  filter(reality_flag == 1) %>%
-  select(-reality_flag)
+reality_dat <- dat[idx_reality, ]      # hold out for final evaluation only
+dat_model   <- dat[-idx_reality, ]     # used for training/test/CV only
 
-# Keep modeling rows (used for train/test and model selection)
-dat_model <- dat %>%
-  filter(reality_flag == 0) %>%
-  select(-reality_flag)
+# Make column names safe
+names(dat_model)   <- make.names(names(dat_model))
+names(reality_dat) <- make.names(names(reality_dat))
+
+# ---------------------- Save reality-check data ----------------------
+write.csv(reality_dat,
+          file = "LCdata1000Sample.csv",
+          row.names = FALSE)
+
 
 # ---------------------- Train/test split on modeling data ----------------------
 dat <- as.data.frame(dat_model)
-
-# Make names safe for model formula / xgboost / ranger
-names(dat)        <- make.names(names(dat))
-names(reality_dat) <- make.names(names(reality_dat))
 
 # sanity checks
 stopifnot(is.data.frame(dat))
@@ -428,18 +419,6 @@ results_all$CV_like_MSE <- round(results_all$CV_like_MSE, 3)
 
 print(results_all)
 
-
-# ---------------------- Reality-check evaluation ----------------------
-
-
-# --- XGBoost as best model ---
-X_reality_xgb <- model.matrix(int_rate ~ ., data = reality_dat)[, -1]
-pred_reality_xgb <- predict(xgb, newdata = X_reality_xgb)
-mse_reality_xgb  <- mean((reality_dat$int_rate - pred_reality_xgb)^2)
-rmse_reality_xgb <- sqrt(mse_reality_xgb)
-
-cat("XGB - Reality-check RMSE:", round(rmse_reality_xgb, 3), "\n")
-cat("XGB - Reality-check MSE :", round(mse_reality_xgb, 3), "\n")
 
 # ---------------------- Save best model (XGBoost) ----------------------
 
