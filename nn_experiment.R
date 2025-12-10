@@ -175,6 +175,10 @@ num_classes <- length(unique(y_num))
 # 2. Train / validation / test split (stratified)
 ############################################################
 
+
+### Save Splits in csv files ###
+
+
 set.seed(1)
 train_index <- createDataPartition(y_num, p = 0.7, list = FALSE)
 
@@ -209,6 +213,8 @@ print(class_weights)
 ############################################################
 # 4. Hyperparameters via FLAGS (for tfruns::tuning_run)
 ############################################################
+
+# Value here is only default value.for the experiment, the values are defined in the tuning script.
 
 FLAGS <- flags(
   flag_numeric("learning_rate", 0.0001),
