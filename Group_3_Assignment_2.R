@@ -32,6 +32,13 @@ if(!require('tensorflow')) {
   library('tensorflow')
 }
 
+if(!require('tfruns')) {
+  install.packages('tfruns')
+  library('tfruns')
+} else {
+  library('tfruns')
+}
+
 # tensorflow::install_tensorflow() 
 # Run the line above once manually if tensorflow backend is not installed
 
@@ -304,7 +311,7 @@ summary(model_cnn)
 history_cnn <- model_cnn %>% fit(
   x_train,
   y_train,
-  epochs          = 500,
+  epochs          = 1000,
   batch_size      = 512,
   validation_data = list(x_val, y_val),
   verbose         = 1
