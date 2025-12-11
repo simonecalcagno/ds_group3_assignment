@@ -2,23 +2,26 @@ library(tfruns)
 
 runs <- tuning_run(
   "nn_experiment.R",
-  runs_dir ="tuning_cnn_fine",
-  sample   = 0.8,           # ca. 25% der Kombinationen
+  runs_dir = "tuning_ffn_7layer",
+  sample   = 0.7,   # you can reduce to 0.7 if needed
   flags = list(
-    learning_rate = c(0.0005),  #0.0001, 0.00005,
-    batch_size    = c(512),
-    units1        = c(256, 512),
-    units2        = c(64, 128),
-    units3        = c(16, 32), 
-    # units4        = c(16), # FIXIERT
-    act1          = c("relu"),
-    act2          = c("relu"),     # FIXIERT
-    act3          = c("relu"),     # FIXIERT
-    # act4          = c("relu"),   
-    dropout       = c(0.1, 0.2),
-    epochs        = c(2000)        # FIXIERT, Early Stopping stoppt früher
+    # Optimizer hyperparameters
+    learning_rate = c(0.0005, 0.0002),
+    batch_size    = c(256),
+    
+    # Architecture scaling factor
+    width_factor  = c(0.75, 1.0),
+    
+    # Activation
+    act = c("relu", "elu"),
+    
+    # Single dropout hyperparameter
+    drop = c(0.1, 0.2, 0.3),
+    
+    epochs = 2000
   )
 )
+
 
 
 # ---- Find and print best run ----

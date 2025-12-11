@@ -217,29 +217,19 @@ print(class_weights)
 # Value here is only default value.for the experiment, the values are defined in the tuning script.
 
 FLAGS <- flags(
-  flag_numeric("learning_rate", 0.0001),
-  flag_integer("batch_size",    256),
-  flag_integer("units1",        512),
-  flag_integer("units2",        256),
-  flag_integer("units3",        128),      
-  flag_integer("units4",        64), 
-  flag_integer("units5",        32), 
-  flag_integer("units6",        16), 
+  flag_numeric("learning_rate", 0.0002),
+  flag_integer("batch_size", 512),
   
-  flag_string ("act1",          "relu"),
-  flag_string ("act2",          "relu"),
-  flag_string ("act3",          "relu"),
-  flag_string ("act4",          "relu"),
-  flag_string ("act5",          "relu"),
-  flag_string ("act6",          "relu"),
-    
-  flag_numeric("dropout1",       0.2),
-  flag_numeric("dropout2",       0.2),
-  flag_numeric("dropout3",       0.2),
-  flag_numeric("dropout4",       0.2),
-  flag_numeric("dropout5",       0.2),
-  flag_numeric("dropout6",       0.2),
-  flag_integer("epochs",        2000)
+  # NEW: scaling factor for all layers
+  flag_numeric("width_factor", 1.0),
+  
+  # NEW: single dropout hyperparameter
+  flag_numeric("drop", 0.2),
+  
+  # Activation
+  flag_string("act", "elu"),
+  
+  flag_integer("epochs", 2000)
 )
 
 ############################################################
@@ -248,54 +238,48 @@ FLAGS <- flags(
 
 l2_reg <- 0.002
 
+# Helper block
+build_block <- function(model, units, act, dropout) {
+  model %>%
+    layer_dense(
+      units = units,
+      activation = act,
+      kernel_regularizer = regularizer_l2(l2_reg)
+    ) %>%
+    layer_batch_normalization() %>%
+    layer_dropout(rate = dropout)
+}
+
+# Base architecture (scaled by width_factor)
+base_units <- c(1024, 768, 512, 384, 256, 128, 64)
+scaled_units <- as.integer(base_units * FLAGS$width_factor)
+
 model_ffn <- keras_model_sequential() %>%
+  
+  # Input block
   layer_dense(
-    units            = FLAGS$units1,
-    activation       = FLAGS$act1,
-    input_shape      = ncol(x_train),
+    units = scaled_units[1],
+    activation = FLAGS$act,
+    input_shape = ncol(x_train),
     kernel_regularizer = regularizer_l2(l2_reg)
   ) %>%
   layer_batch_normalization() %>%
-  layer_dropout(rate = FLAGS$dropout1) %>%
+  layer_dropout(rate = FLAGS$drop) %>%
+  
+  # Blocks 2–7
+  build_block(., scaled_units[2], FLAGS$act, FLAGS$drop) %>%
+  build_block(., scaled_units[3], FLAGS$act, FLAGS$drop) %>%
+  build_block(., scaled_units[4], FLAGS$act, FLAGS$drop) %>%
+  build_block(., scaled_units[5], FLAGS$act, FLAGS$drop) %>%
+  build_block(., scaled_units[6], FLAGS$act, FLAGS$drop) %>%
+  build_block(., scaled_units[7], FLAGS$act, FLAGS$drop) %>%
+  
+  # Output layer
   layer_dense(
-    units            = FLAGS$units2,
-    activation       = FLAGS$act2,
-    kernel_regularizer = regularizer_l2(l2_reg)
-  ) %>%
-  layer_batch_normalization() %>%
-  layer_dropout(rate = FLAGS$dropout2) %>%
-  layer_dense(
-    units            = FLAGS$units3,
-    activation       = FLAGS$act3,
-    kernel_regularizer = regularizer_l2(l2_reg)
-  ) %>%
-  layer_batch_normalization() %>%
-  layer_dropout(rate = FLAGS$dropout3) %>%
-  layer_dense(
-    units            = FLAGS$units4,
-    activation       = FLAGS$act4,
-   kernel_regularizer = regularizer_l2(l2_reg)
-  ) %>%
-  layer_batch_normalization() %>%
-  layer_dropout(rate = FLAGS$dropout4) %>%
-  layer_dense(
-     units            = FLAGS$units5,
-     activation       = FLAGS$act5,
-  kernel_regularizer = regularizer_l2(l2_reg)
-  ) %>%
-  layer_batch_normalization() %>%
-  layer_dropout(rate = FLAGS$dropout5) %>%
-  layer_dense(
-     units            = FLAGS$units6,
-     activation       = FLAGS$act6,
-  kernel_regularizer = regularizer_l2(l2_reg)
-  ) %>% 
-  layer_batch_normalization() %>%
-  layer_dropout(rate = FLAGS$dropout6) %>%
-  layer_dense(
-    units      = num_classes,
+    units = num_classes,
     activation = "softmax"
   )
+
 model_ffn %>% compile(
   optimizer = optimizer_adam(learning_rate = FLAGS$learning_rate),
   loss      = "sparse_categorical_crossentropy",
@@ -334,16 +318,19 @@ history_ffn <- model_ffn %>% fit(
 )
 
 ############################################################
-# 7. Evaluation on test set (logged by tfruns)
+# 7. Evaluation on test set (DISABLED DURING TUNING)
 ############################################################
 
-scores <- model_ffn %>% evaluate(
-  x_test,
-  y_test,
-  verbose = 0
-)
+# IMPORTANT:
+# Do NOT evaluate on the test set during tuning.
+# It causes information leakage and invalidates test results.
 
-print(scores)
+# scores <- model_ffn %>% evaluate(
+#   x_test,
+#   y_test,
+#   verbose = 0
+# )
+# print(scores)
 
 ############################################################
 # 8. Save model in this run's directory
