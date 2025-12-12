@@ -3,7 +3,7 @@ library(tfruns)
 runs <- tuning_run(
   "nn_experiment.R",
   runs_dir = "tuning_ffn_7layer",
-  sample   = 1,   # you can reduce to 0.7 if needed
+  sample   = 1,   
   flags = list(
     # Optimizer hyperparameters
     learning_rate = c(0.0005, 0.0002),
