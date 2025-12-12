@@ -1,47 +1,197 @@
+############################################################
+# Hyperparameter Tuning Script for Neural Network
+############################################################
+
 library(tfruns)
+library(dplyr)
+
+
+############################################################
+# Run Hyperparameter Search
+############################################################
 
 runs <- tuning_run(
   "nn_experiment.R",
   runs_dir = "tuning_ffn_7layer",
-  sample   = 0.7,   # you can reduce to 0.7 if needed
+  sample   = 1.0,  # Run all combinations (20 total)
   flags = list(
     # Optimizer hyperparameters
-    learning_rate = c(0.0005, 0.0002),
-    batch_size    = c(256),
+    learning_rate = c(0.0005, 0.001),      # 2 options
+    batch_size    = c(256),                 # 1 option (fixed)
     
     # Architecture scaling factor
-    width_factor  = c(0.75, 1.0),
+    width_factor  = c(0.75, 1.0),          # 2 options
     
-    # Activation
-    act = c("relu", "elu"),
+    # Activation function
+    act = c("gelu", "elu"),                 # 2 options
     
-    # Single dropout hyperparameter
-    drop = c(0.1, 0.2, 0.3),
+    # Dropout rate
+    drop = c(0.1, 0.2, 0.3),               # 3 options
     
-    epochs = 2000
+    # Training epochs
+    epochs = 1000  # Let early stopping handle this
   )
 )
 
+# Total combinations: 2 × 1 × 2 × 2 × 3 = 24 runs
+# With sample=1.0, all 24 will run
+# If you want exactly 20, set sample = 20/24 ≈ 0.83
 
+############################################################
+# Analyze Results - Sort by Validation Accuracy
+############################################################
 
-# ---- Find and print best run ----
-library(tfruns)
-library(dplyr)
+cat("\n========================================\n")
+cat("TOP 10 RUNS BY VALIDATION ACCURACY\n")
+cat("========================================\n\n")
 
-# Falls du tuning_run() gerade ausgeführt hast, hast du bereits ein Objekt `runs`.
-# Andernfalls könntest du die Runs z.B. so laden:
-# runs <- ls_runs(runs_dir = "tuning_cnn")
-
-best_10 <- runs %>%
-  as.data.frame() %>%                      # sicherstellen, dass es ein Data Frame ist
-  arrange(metric_val_loss) %>%             # nach val_loss sortieren (aufsteigend)
+best_by_acc <- runs %>%
+  as.data.frame() %>%
+  arrange(desc(metric_val_accuracy)) %>%  # Sort by accuracy descending
   select(
-    starts_with("flag_"),                  # alle Hyperparameter (Setup)
-    metric_val_accuracy,                   # KPI: Validation Accuracy
-    metric_val_loss                        # KPI: Validation Loss
+    run_dir,                         # Run identifier
+    starts_with("flag_"),            # All hyperparameters
+    metric_val_accuracy,             # Main metric: Validation Accuracy
+    metric_val_loss,                 # Validation Loss
+    metric_accuracy,                 # Training Accuracy (check overfitting)
+    metric_loss                      # Training Loss
   ) %>%
-  slice(1:10)                              # nur die 10 besten
+  slice(1:10)
 
-print(best_10)
+print(best_by_acc)
 
+############################################################
+# Alternative View: Sort by Validation Loss
+############################################################
 
+cat("\n========================================\n")
+cat("TOP 10 RUNS BY VALIDATION LOSS\n")
+cat("========================================\n\n")
+
+best_by_loss <- runs %>%
+  as.data.frame() %>%
+  arrange(metric_val_loss) %>%      # Sort by loss ascending (lower is better)
+  select(
+    run_dir,
+    starts_with("flag_"),
+    metric_val_loss,
+    metric_val_auc,
+    metric_val_accuracy
+  ) %>%
+  slice(1:10)
+
+print(best_by_loss)
+
+############################################################
+# Check for Overfitting
+############################################################
+
+cat("\n========================================\n")
+cat("OVERFITTING CHECK (Top 5 by Accuracy)\n")
+cat("========================================\n\n")
+
+overfitting_check <- runs %>%
+  as.data.frame() %>%
+  arrange(desc(metric_val_accuracy)) %>%
+  mutate(
+    acc_gap = metric_accuracy - metric_val_accuracy  # Gap between train and val accuracy
+  ) %>%
+  select(
+    run_dir,
+    flag_drop,
+    flag_width_factor,
+    metric_val_accuracy,
+    acc_gap
+  ) %>%
+  slice(1:5)
+
+print(overfitting_check)
+cat("\nNote: Large gaps indicate overfitting. Consider higher dropout or lower width_factor.\n")
+
+############################################################
+# Save Best Configuration
+############################################################
+
+best_run <- runs %>%
+  as.data.frame() %>%
+  arrange(desc(metric_val_accuracy)) %>%
+  slice(1)
+
+cat("\n========================================\n")
+cat("BEST CONFIGURATION (by val_accuracy)\n")
+cat("========================================\n\n")
+
+cat("Run Directory:", best_run$run_dir, "\n")
+cat("Validation Accuracy:", round(best_run$metric_val_accuracy, 4), "\n")
+cat("Validation Loss:", round(best_run$metric_val_loss, 4), "\n\n")
+
+cat("Best Hyperparameters:\n")
+cat("  - learning_rate:", best_run$flag_learning_rate, "\n")
+cat("  - batch_size:", best_run$flag_batch_size, "\n")
+cat("  - width_factor:", best_run$flag_width_factor, "\n")
+cat("  - activation:", best_run$flag_act, "\n")
+cat("  - dropout:", best_run$flag_drop, "\n")
+
+# Save best configuration to file
+best_config <- list(
+  learning_rate = best_run$flag_learning_rate,
+  batch_size = best_run$flag_batch_size,
+  width_factor = best_run$flag_width_factor,
+  act = best_run$flag_act,
+  drop = best_run$flag_drop,
+  val_accuracy = best_run$metric_val_accuracy,
+  val_loss = best_run$metric_val_loss,
+  run_dir = best_run$run_dir
+)
+
+saveRDS(best_config, "best_hyperparameters.rds")
+cat("\nBest configuration saved to: best_hyperparameters.rds\n")
+
+############################################################
+# Visualize Results (if you want)
+############################################################
+
+# Uncomment to create plots
+# library(ggplot2)
+# 
+# # Plot: Dropout vs Validation AUC
+# ggplot(runs %>% as.data.frame(), aes(x = factor(flag_drop), y = metric_val_auc)) +
+#   geom_boxplot() +
+#   labs(title = "Dropout Rate vs Validation AUC", x = "Dropout", y = "Val AUC") +
+#   theme_minimal()
+# 
+# # Plot: Width Factor vs Validation AUC
+# ggplot(runs %>% as.data.frame(), aes(x = factor(flag_width_factor), y = metric_val_auc)) +
+#   geom_boxplot() +
+#   labs(title = "Width Factor vs Validation AUC", x = "Width Factor", y = "Val AUC") +
+#   theme_minimal()
+# 
+# # Plot: Learning Rate vs Validation AUC
+# ggplot(runs %>% as.data.frame(), aes(x = factor(flag_learning_rate), y = metric_val_auc)) +
+#   geom_boxplot() +
+#   labs(title = "Learning Rate vs Validation AUC", x = "Learning Rate", y = "Val AUC") +
+#   theme_minimal()
+
+############################################################
+# Load and Evaluate Best Model on Test Set
+############################################################
+
+cat("\n========================================\n")
+cat("NEXT STEPS\n")
+cat("========================================\n\n")
+cat("1. Review the best hyperparameters above\n")
+cat("2. Uncomment the test evaluation section in nn_experiment.R\n")
+cat("3. Run the best configuration on the full dataset:\n\n")
+cat("   library(tfruns)\n")
+cat("   training_run(\n")
+cat("     'nn_experiment.R',\n")
+cat("     flags = list(\n")
+cat("       learning_rate =", best_run$flag_learning_rate, ",\n")
+cat("       batch_size =", best_run$flag_batch_size, ",\n")
+cat("       width_factor =", best_run$flag_width_factor, ",\n")
+cat("       act = '", best_run$flag_act, "',\n", sep="")
+cat("       drop =", best_run$flag_drop, ",\n")
+cat("       epochs = 2000\n")
+cat("     )\n")
+cat("   )\n\n")
+cat("4. This will give you the final test set performance\n")

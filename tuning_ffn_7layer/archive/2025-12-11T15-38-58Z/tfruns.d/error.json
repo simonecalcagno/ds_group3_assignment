@@ -1,0 +1,4 @@
+{
+  "message": "KeyError: 0\nRun `reticulate::py_last_error()` for details.",
+  "traceback": ["py_call_impl(callable, call_args$unnamed, call_args$named)", "layer(object, ...)", "compose_layer(object = object, layer = x, ...)", "layer(inputs)", "layer_concatenate(list(income_emb, educ_emb, fam_emb, house_emb, \n    occ_emb, numeric_in, binary_in), name = \"merged_features\")", "eval(ei, envir)", "eval(ei, envir)", "withVisible(eval(ei, envir))", "tuning_run(\"nn_experiment.R\", runs_dir = \"tuning_ffn_7layer\", \n    sample = 0.8, flags = list(learning_rate = c(5e-04), batch_size = c(256), \n        width_factor = c(0.75, 1), act = c(\"relu\", \"elu\"), drop = c(0.1, \n            0.2, 0.3), epochs = 2000))"]
+}
