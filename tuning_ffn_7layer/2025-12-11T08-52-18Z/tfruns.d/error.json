@@ -1,0 +1,4 @@
+{
+  "message": "cannot open the connection",
+  "traceback": ["file(file, \"rt\")", "read.table(file = file, header = header, sep = sep, quote = quote, \n    dec = dec, fill = fill, comment.char = comment.char, ...)", "read.csv(\"Dataset-part-2.csv\", stringsAsFactors = FALSE)", "eval(ei, envir)", "eval(ei, envir)", "withVisible(eval(ei, envir))", "tuning_run(\"nn_experiment.R\", runs_dir = \"tuning_ffn_7layer\", \n    sample = 1, flags = list(learning_rate = c(5e-04, 2e-04), \n        batch_size = c(256), width_factor = c(0.75, 1), act = c(\"relu\", \n            \"elu\"), drop = c(0.1, 0.2, 0.3), epochs = 2000))"]
+}

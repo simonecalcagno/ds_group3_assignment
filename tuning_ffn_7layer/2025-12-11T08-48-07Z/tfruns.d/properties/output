@@ -1,0 +1,24 @@
+
+> ############################################################
+> # nn_experiment.R
+> # Feed-forward neural network for Assignment 2
+> # - full preproc .... [TRUNCATED] 
+
+> ###############
+> # Libraries
+> ###############
+> if (!require("dplyr"))      install.packages("dplyr");      library(dplyr)
+
+> if (!require("caret"))      install.packages("caret");      library(caret)
+
+> if (!require("keras3"))     install.packages("keras3");     library(keras3)
+
+> if (!require("tensorflow")) install.packages("tensorflow"); library(tensorflow)
+
+> if (!require("tfruns"))     install.packages("tfruns");     library(tfruns)
+
+> if (!require("fastDummies")) install.packages("fastDummies"); library(fastDummies)
+
+> ############################################################
+> # 1. Data loading and preprocessing
+> ############################################### .... [TRUNCATED] 
