@@ -12,24 +12,25 @@ library(dplyr)
 
 runs <- tuning_run(
   "nn_experiment.R",
-  runs_dir = "tuning_ffn_7layer",
+  runs_dir = "tuning_ffn_5layerV2",
   sample   = 1.0,  # Run all combinations (20 total)
   flags = list(
     # Optimizer hyperparameters
-    learning_rate = c(0.0005, 0.001),      # 2 options
-    batch_size    = c(256),                 # 1 option (fixed)
+    learning_rate = c(0.0005,0.001),      # 2 options
+    batch_size    = c(512),    
+    l2_reg        = c(0.002, 0.001),# 1 option (fixed)
     
     # Architecture scaling factor
-    width_factor  = c(0.75, 1.0),          # 2 options
+    width_factor  = c(1.0),          # 2 options
     
     # Activation function
-    act = c("gelu", "elu"),                 # 2 options
+    act = c("gelu"),                 # 2 options
     
     # Dropout rate
-    drop = c(0.1, 0.2, 0.3),               # 3 options
+    drop = c(0.3, 0.4),               # 3 options
     
     # Training epochs
-    epochs = 1000  # Let early stopping handle this
+    epochs = 5000  # Let early stopping handle this
   )
 )
 
@@ -75,7 +76,6 @@ best_by_loss <- runs %>%
     run_dir,
     starts_with("flag_"),
     metric_val_loss,
-    metric_val_auc,
     metric_val_accuracy
   ) %>%
   slice(1:10)
@@ -191,7 +191,7 @@ cat("       batch_size =", best_run$flag_batch_size, ",\n")
 cat("       width_factor =", best_run$flag_width_factor, ",\n")
 cat("       act = '", best_run$flag_act, "',\n", sep="")
 cat("       drop =", best_run$flag_drop, ",\n")
-cat("       epochs = 2000\n")
+cat("       epochs = 5000\n")
 cat("     )\n")
 cat("   )\n\n")
 cat("4. This will give you the final test set performance\n")
