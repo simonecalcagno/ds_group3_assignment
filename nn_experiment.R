@@ -17,7 +17,6 @@ if (!require("keras3"))      install.packages("keras3");      library(keras3)
 if (!require("tensorflow"))  install.packages("tensorflow");  library(tensorflow)
 if (!require("tfruns"))      install.packages("tfruns");      library(tfruns)
 if (!require("fastDummies")) install.packages("fastDummies"); library(fastDummies)
-if (!require("smotefamily")) install.packages("smotefamily"); library(smotefamily)
 
 
 ############################################################
@@ -147,26 +146,11 @@ x_val_imp   <- impute_median(x_val_raw,   medians)
 x_test_imp  <- impute_median(x_test_raw,  medians)
 
 ############################################################
-# 2.5 Oversample minority classes in training data (SMOTE via smotefamily)
+# 3.2 Scale to [0,1] using train min/max (no leakage)
 ############################################################
 
-# Use imputed x_train_imp for SMOTE (no NAs)
-train_df <- as.data.frame(x_train_imp)
-train_df$status <- factor(y_train, levels = 0:(num_classes-1))
-
-# Apply SMOTE
-smote_result <- SMOTE(X = train_df[, -ncol(train_df)], target = train_df$status, dup_size = 2)
-
-# Extract back to matrices
-x_train_imp <- as.matrix(smote_result$data[, -ncol(smote_result$data)])
-y_train <- as.numeric(smote_result$data$class)
-
-# Optional: Check new class distribution
-print(table(y_train))
-
-# 3.2 Scale to [0,1] using train min/max (no leakage)
-mins <- apply(x_train_imp, 2, min)
-maxs <- apply(x_train_imp, 2, max)
+mins  <- apply(x_train_imp, 2, min)
+maxs  <- apply(x_train_imp, 2, max)
 range <- maxs - mins
 range[range == 0] <- 1  # avoid div-by-zero for constant columns
 
@@ -178,19 +162,92 @@ scale_minmax <- function(mat, mins, range) {
   scaled
 }
 
-x_train <- scale_minmax(x_train_imp, mins, range)
-x_val   <- scale_minmax(x_val_imp,   mins, range)
-x_test  <- scale_minmax(x_test_imp,  mins, range)
+# Scale train/val/test
+x_train_scaled <- scale_minmax(x_train_imp, mins, range)
+x_val          <- scale_minmax(x_val_imp,   mins, range)
+x_test         <- scale_minmax(x_test_imp,  mins, range)
 
-const_cols <- which(range == 0)
+############################################################
+# 3.3 Thoughtful oversampling on *scaled* training data
+#     (train only, rare classes only, limited factor)
+############################################################
+
+# We'll oversample on the scaled training data.
+train_df <- as.data.frame(x_train_scaled)
+train_df$status <- factor(y_train)  # still 0..K-1 but as factor
+
+cat("Class distribution BEFORE oversampling:\n")
+print(table(train_df$status))
+
+# --- config knobs (you can tweak these) ---
+minor_threshold <- 0.05   # oversample classes with < 5% of train
+target_ratio    <- 0.15   # oversample to 15% of majority size
+max_dup_factor  <- 5      # never duplicate a class more than 5x its original size
+# -----------------------------------------
+
+tab   <- table(train_df$status)
+n_tot <- sum(tab)
+prop  <- tab / n_tot
+
+majority_class <- names(tab)[which.max(tab)]
+majority_n     <- max(tab)
+
+cat("\nProportions per class:\n")
+print(round(prop, 4))
+cat("\nMajority class:", majority_class, "with", majority_n, "samples\n")
+
+resampled_idx <- integer(0)
+
+for (cl in names(tab)) {
+  idx   <- which(train_df$status == cl)
+  n_cl  <- length(idx)
+  p_cl  <- prop[cl]
+  
+  # Step 2: identify which classes need help
+  if (cl == majority_class || p_cl >= minor_threshold) {
+    # Keep majority and medium-frequency classes as they are
+    resampled_idx <- c(resampled_idx, idx)
+  } else {
+    # Rare class → candidate for oversampling
+    # Step 3: how much to oversample
+    target_n <- as.integer(target_ratio * majority_n)
+    
+    # respect max duplication factor
+    max_allowed <- n_cl * max_dup_factor
+    target_n <- min(target_n, max_allowed)
+    
+    if (target_n <= n_cl) {
+      # Already at/above target → do nothing
+      resampled_idx <- c(resampled_idx, idx)
+    } else {
+      # Controlled random oversampling with replacement
+      extra_idx <- sample(idx, size = target_n - n_cl, replace = TRUE)
+      resampled_idx <- c(resampled_idx, idx, extra_idx)
+    }
+  }
+}
+
+# Shuffle to avoid any ordering bias
+resampled_idx <- sample(resampled_idx)
+
+# Final training data after oversampling
+x_train <- x_train_scaled[resampled_idx, , drop = FALSE]
+y_train <- as.numeric(train_df$status[resampled_idx]) - 1L  # back to 0..K-1
+
+cat("\nClass distribution AFTER oversampling:\n")
+print(table(factor(y_train, levels = 0:(num_classes - 1))))
+
+############################################################
+# 3.4 Remove constant columns (based on original mins/maxs)
+############################################################
+
+const_cols <- which(maxs == mins)
 if (length(const_cols) > 0) {
   cat("Removing", length(const_cols), "constant columns\n")
   x_train <- x_train[, -const_cols, drop = FALSE]
-  x_val   <- x_val[, -const_cols, drop = FALSE]
-  x_test  <- x_test[, -const_cols, drop = FALSE]
+  x_val   <- x_val[,   -const_cols, drop = FALSE]
+  x_test  <- x_test[,  -const_cols, drop = FALSE]
 }
-
-
 
 
 ############################################################
@@ -225,7 +282,7 @@ FLAGS <- flags(
 
 l2_reg <- FLAGS$l2_reg
 
-base_units  <- c(768, 512 , 384,256,128)
+base_units  <- c(512, 256, 128, 64, 32)
 units_scaled <- as.integer(base_units * FLAGS$width_factor)
 
 model_ffn <- keras_model_sequential() %>%
@@ -263,8 +320,12 @@ model_ffn <- keras_model_sequential() %>%
   layer_dropout(rate  = FLAGS$drop) %>%
   
   layer_dense(
-    units             = units_scaled[5],
-    activation        = FLAGS$act) %>%
+    units              = units_scaled[5],
+    activation         = FLAGS$act,
+    kernel_regularizer = regularizer_l2(l2_reg)
+  ) %>%
+  layer_batch_normalization() %>%
+  layer_dropout(rate = FLAGS$drop) %>%
   
   layer_dense(
     units      = num_classes,
@@ -285,14 +346,14 @@ summary(model_ffn)
 
 callback_es <- callback_early_stopping(
   monitor              = "val_loss",
-  patience             = 300,
+  patience             = 100,
   restore_best_weights = TRUE
 )
 
 callback_lr <- callback_reduce_lr_on_plateau(
   monitor  = "val_loss",
-  factor   = 0.8,   # or at most 0.3
-  patience = 100,    # smaller than your early stopping patience
+  factor   = 0.5,   # or at most 0.3
+  patience = 50,    # smaller than your early stopping patience
   min_lr   = 1e-6,
   verbose  = 1
 )
@@ -308,18 +369,45 @@ history_ffn <- model_ffn %>% fit(
   verbose         = 2
 )
 
-############################################################
-# 8. (OPTIONAL) Evaluation on test set
-#    Commented out so test is NOT used in every tuning run
+###########################################################
+# 8. OPTIONAL: Evaluation on test set + confusion matrix
+#    IMPORTANT: keep this commented during tuning_run().
+#    Uncomment only when you train the FINAL best model.
 ############################################################
 
+# library(caret)  # already loaded at top
+
+# --- scalar metrics on test set ---
 # scores <- model_ffn %>% evaluate(
 #   x_test,
 #   y_test,
 #   verbose = 0
 # )
+# cat("\nTest loss:", scores["loss"],
+#     "  Test accuracy:", scores["accuracy"], "\n")
+
+# --- confusion matrix on test set ---
+# 1. Predict class probabilities
+# y_test_pred_prob <- model_ffn %>% predict(x_test)
 #
-# print(scores)
+# 2. Convert to class index 0..(num_classes-1)
+# (keras gives 1-based argmax, so subtract 1)
+# y_test_pred_class <- apply(y_test_pred_prob, 1, which.max) - 1L
+#
+# 3. Map numeric classes back to factor labels
+#    status_levels was defined at the top from dataset$status
+# true_labels <- factor(
+#   status_levels[y_test + 1L],
+#   levels = status_levels
+# )
+# pred_labels <- factor(
+#   status_levels[y_test_pred_class + 1L],
+#   levels = status_levels
+# )
+#
+# 4. Confusion matrix
+# cm <- confusionMatrix(pred_labels, true_labels)
+# print(cm)
 
 ############################################################
 # 9. Save model in this run's directory
