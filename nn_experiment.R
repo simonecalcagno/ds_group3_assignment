@@ -47,6 +47,8 @@ status_levels <- levels(dataset$status)
 dataset$is_unemployed <- ifelse(dataset$DAYS_EMPLOYED == 365243, 1L, 0L)
 dataset$DAYS_EMPLOYED[dataset$DAYS_EMPLOYED == 365243] <- NA
 
+
+
 # Step 5: Create age and years employed (in years)
 dataset$AGE_YEARS      <- abs(dataset$DAYS_BIRTH) / 365
 dataset$YEARS_EMPLOYED <- abs(dataset$DAYS_EMPLOYED) / 365
@@ -65,12 +67,25 @@ dataset$OCCUPATION_TYPE[is.na(dataset$OCCUPATION_TYPE)] <- "Unknown"
 dataset$CNT_FAM_MEMBERS <- pmin(dataset$CNT_FAM_MEMBERS, 10)
 dataset$CNT_CHILDREN    <- pmin(dataset$CNT_CHILDREN,    6)
 
+
+
 # Step 8: Log-transform income to reduce skewness (with outlier capping)
 if ("AMT_INCOME_TOTAL" %in% names(dataset)) {
   q99 <- quantile(dataset$AMT_INCOME_TOTAL, 0.99, na.rm = TRUE)
   dataset$AMT_INCOME_TOTAL <- pmin(dataset$AMT_INCOME_TOTAL, q99)
   dataset$AMT_INCOME_TOTAL <- log1p(dataset$AMT_INCOME_TOTAL)
 }
+
+# Step 8: Log-transform income
+dataset$AMT_INCOME_TOTAL <- log1p(dataset$AMT_INCOME_TOTAL)
+
+# NEW FEATURES (AFTER log transform)
+dataset$INCOME_PER_PERSON <- dataset$AMT_INCOME_TOTAL / 
+  pmax(dataset$CNT_FAM_MEMBERS, 1)
+
+dataset$CHILD_RATIO <- dataset$CNT_CHILDREN / 
+  pmax(dataset$CNT_FAM_MEMBERS, 1)
+
 
 # Step 9: Remove uninformative constant feature FLAG_MOBIL (always 1)
 if ("FLAG_MOBIL" %in% names(dataset)) {
@@ -122,11 +137,9 @@ y_test     <- y_temp[-val_index]
 
 
 
+#############################################################
+# 3.1 Median imputation (train stats)
 ############################################################
-# 3. Imputation + scaling using TRAIN statistics only
-############################################################
-
-# 3.1 Median imputation (train stats → apply to val/test)
 medians <- apply(x_train_raw, 2, function(v) {
   m <- median(v, na.rm = TRUE)
   if (is.na(m)) 0 else m
@@ -135,9 +148,7 @@ medians <- apply(x_train_raw, 2, function(v) {
 impute_median <- function(mat, med) {
   for (j in seq_len(ncol(mat))) {
     idx_na <- is.na(mat[, j])
-    if (any(idx_na)) {
-      mat[idx_na, j] <- med[j]
-    }
+    if (any(idx_na)) mat[idx_na, j] <- med[j]
   }
   mat
 }
@@ -147,28 +158,13 @@ x_val_imp   <- impute_median(x_val_raw,   medians)
 x_test_imp  <- impute_median(x_test_raw,  medians)
 
 ############################################################
-# 2.5 Oversample minority classes in training data (SMOTE via smotefamily)
+# 3.2 Scale BEFORE SMOTE (using train stats)
 ############################################################
 
-# Use imputed x_train_imp for SMOTE (no NAs)
-train_df <- as.data.frame(x_train_imp)
-train_df$status <- factor(y_train, levels = 0:(num_classes-1))
-
-# Apply SMOTE
-smote_result <- SMOTE(X = train_df[, -ncol(train_df)], target = train_df$status, dup_size = 2)
-
-# Extract back to matrices
-x_train_imp <- as.matrix(smote_result$data[, -ncol(smote_result$data)])
-y_train <- as.numeric(smote_result$data$class)
-
-# Optional: Check new class distribution
-print(table(y_train))
-
-# 3.2 Scale to [0,1] using train min/max (no leakage)
-mins <- apply(x_train_imp, 2, min)
-maxs <- apply(x_train_imp, 2, max)
+mins  <- apply(x_train_imp, 2, min)
+maxs  <- apply(x_train_imp, 2, max)
 range <- maxs - mins
-range[range == 0] <- 1  # avoid div-by-zero for constant columns
+range[range == 0] <- 1
 
 scale_minmax <- function(mat, mins, range) {
   scaled <- sweep(mat, 2, mins, FUN = "-")
@@ -178,18 +174,76 @@ scale_minmax <- function(mat, mins, range) {
   scaled
 }
 
-x_train <- scale_minmax(x_train_imp, mins, range)
-x_val   <- scale_minmax(x_val_imp,   mins, range)
-x_test  <- scale_minmax(x_test_imp,  mins, range)
+x_train_scaled <- scale_minmax(x_train_imp, mins, range)
+x_val_scaled   <- scale_minmax(x_val_imp,   mins, range)
+x_test_scaled  <- scale_minmax(x_test_imp,  mins, range)
+
+############################################################
+# 3.25 Remove constant columns (BEFORE SMOTE)
+############################################################
 
 const_cols <- which(range == 0)
+
 if (length(const_cols) > 0) {
-  cat("Removing", length(const_cols), "constant columns\n")
-  x_train <- x_train[, -const_cols, drop = FALSE]
-  x_val   <- x_val[, -const_cols, drop = FALSE]
-  x_test  <- x_test[, -const_cols, drop = FALSE]
+  cat("Removing", length(const_cols), "constant columns BEFORE SMOTE\n")
+  x_train_scaled <- x_train_scaled[, -const_cols, drop = FALSE]
+  x_val_scaled   <- x_val_scaled[,   -const_cols, drop = FALSE]
+  x_test_scaled  <- x_test_scaled[,  -const_cols, drop = FALSE]
 }
 
+############################################################
+# 3.3 SMOTE on *scaled* training data
+############################################################
+
+############################################################
+# 3.3 SMOTE on *scaled* training data (SAFE)
+############################################################
+
+train_df <- as.data.frame(x_train_scaled)
+
+# FIX class levels ONCE
+train_df$status <- factor(
+  y_train,
+  levels = 0:(num_classes - 1)
+)
+
+cat("Class distribution BEFORE SMOTE:\n")
+print(table(train_df$status))
+
+# Apply SMOTE
+smote_result <- SMOTE(
+  X        = train_df[, -ncol(train_df)],
+  target   = train_df$status,
+  K        = 5,
+  dup_size = 2
+)
+
+# Extract data
+smote_data <- smote_result$data
+
+# 🔒 FORCE correct levels AFTER SMOTE
+smote_data$class <- factor(
+  smote_data$class,
+  levels = 0:(num_classes - 1)
+)
+
+# Extract features
+x_train <- as.matrix(smote_data[, -ncol(smote_data)])
+
+# FIX: SMOTE labels start at 1 → convert to 0..(K-1)
+y_train <- as.integer(smote_data$class) - 1L
+
+# FINAL feature matrices (must match x_train exactly)
+x_val  <- x_val_scaled
+x_test <- x_test_scaled
+
+# SAFETY CHECKS
+stopifnot(!any(is.na(y_train)))
+stopifnot(min(y_train) == 0)
+stopifnot(max(y_train) == (num_classes - 1))
+
+cat("Class distribution AFTER SMOTE:\n")
+print(table(y_train))
 
 
 
@@ -197,13 +251,13 @@ if (length(const_cols) > 0) {
 # 4. Class weights to handle imbalance
 ############################################################
 
-# freq  <- table(y_train)
-# raw_w <- 1 / sqrt(freq)      # softer than 1/freq
-# w     <- raw_w / mean(raw_w) # normalise around 1
-# 
-# class_weights <- as.list(as.numeric(w))
-# names(class_weights) <- names(freq)
-# print(class_weights)
+ freq  <- table(y_train)
+ raw_w <- 1 / sqrt(freq)      # softer than 1/freq
+ w     <- raw_w / mean(raw_w) # normalise around 1
+ 
+ class_weights <- as.list(as.numeric(w))
+ names(class_weights) <- names(freq)
+ print(class_weights)
 
 ############################################################
 # 5. Hyperparameters via FLAGS (for tfruns::tuning_run)
@@ -225,7 +279,7 @@ FLAGS <- flags(
 
 l2_reg <- FLAGS$l2_reg
 
-base_units  <- c(768, 512 , 384,256,128)
+base_units  <- c(512, 256, 128, 64, 32)
 units_scaled <- as.integer(base_units * FLAGS$width_factor)
 
 model_ffn <- keras_model_sequential() %>%
@@ -273,6 +327,7 @@ model_ffn <- keras_model_sequential() %>%
 
 model_ffn %>% compile(
   optimizer = optimizer_adam(learning_rate = FLAGS$learning_rate),
+
   loss      = "sparse_categorical_crossentropy",
   metrics   = "accuracy"
 )
@@ -285,7 +340,7 @@ summary(model_ffn)
 
 callback_es <- callback_early_stopping(
   monitor              = "val_loss",
-  patience             = 300,
+  patience             = 200,
   restore_best_weights = TRUE
 )
 
@@ -304,7 +359,7 @@ history_ffn <- model_ffn %>% fit(
   batch_size      = FLAGS$batch_size,
   validation_data = list(x_val, y_val),
   callbacks       = list(callback_es, callback_lr),
-  #class_weight    = class_weights,
+  class_weight    = class_weights,
   verbose         = 2
 )
 
