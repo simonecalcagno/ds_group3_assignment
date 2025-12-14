@@ -282,7 +282,7 @@ FLAGS <- flags(
 
 l2_reg <- FLAGS$l2_reg
 
-base_units  <- c(512, 256, 128, 64, 32)
+base_units  <- c(1024, 512, 256, 128, 64)
 units_scaled <- as.integer(base_units * FLAGS$width_factor)
 
 model_ffn <- keras_model_sequential() %>%
@@ -319,13 +319,6 @@ model_ffn <- keras_model_sequential() %>%
   layer_batch_normalization() %>%
   layer_dropout(rate  = FLAGS$drop) %>%
   
-  layer_dense(
-    units              = units_scaled[5],
-    activation         = FLAGS$act,
-    kernel_regularizer = regularizer_l2(l2_reg)
-  ) %>%
-  layer_batch_normalization() %>%
-  layer_dropout(rate = FLAGS$drop) %>%
   
   layer_dense(
     units      = num_classes,
@@ -352,7 +345,7 @@ callback_es <- callback_early_stopping(
 
 callback_lr <- callback_reduce_lr_on_plateau(
   monitor  = "val_loss",
-  factor   = 0.5,   # or at most 0.3
+  factor   = 0.75,   # or at most 0.3
   patience = 50,    # smaller than your early stopping patience
   min_lr   = 1e-6,
   verbose  = 1

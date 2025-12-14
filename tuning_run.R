@@ -12,13 +12,13 @@ library(dplyr)
 
 runs <- tuning_run(
   "nn_experiment.R",
-  runs_dir = "tuning_ffn_5layerV2",
+  runs_dir = "tuning_ffn_4layer1412_3",
   sample   = 1.0,  # Run all combinations (20 total)
   flags = list(
     # Optimizer hyperparameters
     learning_rate = c(0.0005,0.001),      # 2 options
-    batch_size    = c(512),    
-    l2_reg        = c(0.002, 0.001),# 1 option (fixed)
+    batch_size    = c(256),    
+    l2_reg        = c(0.0005, 0.001),# 1 option (fixed)
     
     # Architecture scaling factor
     width_factor  = c(1.0),          # 2 options
@@ -27,7 +27,7 @@ runs <- tuning_run(
     act = c("gelu"),                 # 2 options
     
     # Dropout rate
-    drop = c(0.3, 0.4),               # 3 options
+    drop = c(0.3),               # 3 options
     
     # Training epochs
     epochs = 5000  # Let early stopping handle this
