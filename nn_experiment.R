@@ -339,7 +339,7 @@ summary(model_ffn)
 
 callback_es <- callback_early_stopping(
   monitor              = "val_loss",
-  patience             = 100,
+  patience             = 300,
   restore_best_weights = TRUE
 )
 

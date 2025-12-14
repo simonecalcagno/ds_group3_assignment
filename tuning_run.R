@@ -17,7 +17,7 @@ runs <- tuning_run(
   flags = list(
     # Optimizer hyperparameters
     learning_rate = c(0.0005,0.001),      # 2 options
-    batch_size    = c(256),    
+    batch_size    = c(512,1024),    
     l2_reg        = c(0.0005, 0.001),# 1 option (fixed)
     
     # Architecture scaling factor
