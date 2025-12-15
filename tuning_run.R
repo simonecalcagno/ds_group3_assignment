@@ -27,7 +27,7 @@ runs <- tuning_run(
     act = c("gelu"),                 # 2 options
     
     # Dropout rate
-    drop = c(0.3),               # 3 options
+    drop = c(0.15),               # 3 options
     
     # Training epochs
     epochs = 5000  # Let early stopping handle this

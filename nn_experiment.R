@@ -254,13 +254,13 @@ if (length(const_cols) > 0) {
 # 4. Class weights to handle imbalance
 ############################################################
 
-# freq  <- table(y_train)
-# raw_w <- 1 / sqrt(freq)      # softer than 1/freq
-# w     <- raw_w / mean(raw_w) # normalise around 1
-# 
-# class_weights <- as.list(as.numeric(w))
-# names(class_weights) <- names(freq)
-# print(class_weights)
+freq  <- table(y_train)
+raw_w <- 1 / sqrt(freq)      # softer than 1/freq
+w     <- raw_w / mean(raw_w) # normalise around 1
+
+class_weights <- as.list(as.numeric(w))
+names(class_weights) <- names(freq)
+print(class_weights)
 
 ############################################################
 # 5. Hyperparameters via FLAGS (for tfruns::tuning_run)
@@ -325,9 +325,16 @@ model_ffn <- keras_model_sequential() %>%
     activation = "softmax"
   )
 
+y_train_cat <- to_categorical(y_train, num_classes)
+y_val_cat   <- to_categorical(y_val,   num_classes)
+
 model_ffn %>% compile(
   optimizer = optimizer_adam(learning_rate = FLAGS$learning_rate),
-  loss      = "sparse_categorical_crossentropy",
+  #loss      = "sparse_categorical_crossentropy",
+  loss = loss_categorical_crossentropy(
+    from_logits = FALSE,
+    label_smoothing = 0.05   # try 0.05 or 0.1
+  ),
   metrics   = "accuracy"
 )
 
@@ -339,26 +346,29 @@ summary(model_ffn)
 
 callback_es <- callback_early_stopping(
   monitor              = "val_loss",
-  patience             = 300,
+  patience             = 500,
   restore_best_weights = TRUE
 )
 
 callback_lr <- callback_reduce_lr_on_plateau(
   monitor  = "val_loss",
   factor   = 0.75,   # or at most 0.3
-  patience = 50,    # smaller than your early stopping patience
+  patience = 100,    # smaller than your early stopping patience
   min_lr   = 1e-6,
   verbose  = 1
 )
 
+
+
 history_ffn <- model_ffn %>% fit(
   x_train,
-  y_train,
+  #y_train,
+  y_train_cat,
   epochs          = FLAGS$epochs,
   batch_size      = FLAGS$batch_size,
-  validation_data = list(x_val, y_val),
+  validation_data = list(x_val, y_val_cat),#y_val),
   callbacks       = list(callback_es, callback_lr),
-  #class_weight    = class_weights,
+  class_weight    = class_weights,
   verbose         = 2
 )
 
