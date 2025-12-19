@@ -254,13 +254,13 @@ if (length(const_cols) > 0) {
 # 4. Class weights to handle imbalance
 ############################################################
 
-freq  <- table(y_train)
-raw_w <- 1 / sqrt(freq)      # softer than 1/freq
-w     <- raw_w / mean(raw_w) # normalise around 1
-
-class_weights <- as.list(as.numeric(w))
-names(class_weights) <- names(freq)
-print(class_weights)
+# freq  <- table(y_train)
+# raw_w <- 1 / sqrt(freq)      # softer than 1/freq
+# w     <- raw_w / mean(raw_w) # normalise around 1
+# 
+# class_weights <- as.list(as.numeric(w))
+# names(class_weights) <- names(freq)
+# print(class_weights)
 
 ############################################################
 # 5. Hyperparameters via FLAGS (for tfruns::tuning_run)
@@ -293,7 +293,7 @@ model_ffn <- keras_model_sequential() %>%
     kernel_regularizer = regularizer_l2(l2_reg)
   ) %>%
   layer_batch_normalization() %>%
-  layer_dropout(rate  = FLAGS$drop) %>%
+  layer_dropout(rate  = 0.3) %>%
   
   layer_dense(
     units             = units_scaled[2],
@@ -301,7 +301,7 @@ model_ffn <- keras_model_sequential() %>%
     kernel_regularizer = regularizer_l2(l2_reg)
   ) %>%
   layer_batch_normalization() %>%
-  layer_dropout(rate  = FLAGS$drop) %>%
+  layer_dropout(rate  = 0.25) %>%
   
   layer_dense(
     units             = units_scaled[3],
@@ -309,7 +309,7 @@ model_ffn <- keras_model_sequential() %>%
     kernel_regularizer =regularizer_l2(l2_reg)
   ) %>%
   layer_batch_normalization() %>%
-  layer_dropout(rate  = FLAGS$drop) %>%
+  layer_dropout(rate  = 0.2) %>%
   
   layer_dense(
     units             = units_scaled[4],
@@ -317,7 +317,7 @@ model_ffn <- keras_model_sequential() %>%
     kernel_regularizer = regularizer_l2(l2_reg)
   ) %>%
   layer_batch_normalization() %>%
-  layer_dropout(rate  = FLAGS$drop) %>%
+  layer_dropout(rate  = 0.1) %>%
   
   
   layer_dense(
@@ -333,7 +333,7 @@ model_ffn %>% compile(
   #loss      = "sparse_categorical_crossentropy",
   loss = loss_categorical_crossentropy(
     from_logits = FALSE,
-    label_smoothing = 0.05   # try 0.05 or 0.1
+    label_smoothing = 0.1   # try 0.05 or 0.1
   ),
   metrics   = "accuracy"
 )
@@ -368,7 +368,7 @@ history_ffn <- model_ffn %>% fit(
   batch_size      = FLAGS$batch_size,
   validation_data = list(x_val, y_val_cat),#y_val),
   callbacks       = list(callback_es, callback_lr),
-  class_weight    = class_weights,
+  #class_weight    = class_weights,
   verbose         = 2
 )
 
