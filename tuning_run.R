@@ -1,9 +1,8 @@
 ############################################################
 # Hyperparameter Tuning Script for Neural Network
 ############################################################
-
 library(tfruns)
-library(dplyr)
+
 
 
 ############################################################
@@ -16,15 +15,15 @@ runs <- tuning_run(
   sample   = 1.0,  # Run all combinations (20 total)
   flags = list(
     # Optimizer hyperparameters
-    learning_rate = c(0.0005,0.001),      # 2 options
-    batch_size    = c(512,1024),    
-    l2_reg        = c(0.0005, 0.001),# 1 option (fixed)
-    
+    learning_rate = c(0.0003),      # 2 options
+    batch_size    = c(128),    
+    l2_reg        = c(0.00001),# 1 option (fixed)
+  
     # Architecture scaling factor
-    width_factor  = c(1.0),          # 2 options
+    width_factor  = c(1.5),          # 2 options
     
     # Activation function
-    act = c("gelu"),                 # 2 options
+    act = c("relu"),                 # 2 options
     
     # Dropout rate
     drop = c(0.15),               # 3 options
@@ -195,3 +194,4 @@ cat("       epochs = 5000\n")
 cat("     )\n")
 cat("   )\n\n")
 cat("4. This will give you the final test set performance\n")
+

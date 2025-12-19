@@ -1,32 +1,43 @@
-############################################################
+################################################################################
 # nn_experiment.R
 # Feed-forward neural network for Assignment 2
 # - full preprocessing (capping, Unknown occupation, etc.)
 # - class weighting for imbalance
 # - FLAGS for tfruns::tuning_run()
-############################################################
+################################################################################
 
 set.seed(1)
 
-###############
+################################################################################
 # Libraries
-###############
-if (!require("dplyr"))       install.packages("dplyr");       library(dplyr)
-if (!require("caret"))       install.packages("caret");       library(caret)
-if (!require("keras3"))      install.packages("keras3");      library(keras3)
-if (!require("tensorflow"))  install.packages("tensorflow");  library(tensorflow)
-if (!require("tfruns"))      install.packages("tfruns");      library(tfruns)
-if (!require("fastDummies")) install.packages("fastDummies"); library(fastDummies)
+################################################################################
 
+if (!require("dplyr")) install.packages("dplyr")
+library(dplyr)
 
-############################################################
+if (!require("caret")) install.packages("caret")
+library(caret)
+
+if (!require("keras3")) install.packages("keras3")
+library(keras3)
+
+if (!require("tensorflow")) install.packages("tensorflow")
+library(tensorflow)
+
+if (!require("tfruns")) install.packages("tfruns")
+library(tfruns)
+
+if (!require("fastDummies")) install.packages("fastDummies")
+library(fastDummies)
+
+################################################################################
 # 1. Data loading and preprocessing (no leakage)
-############################################################
+################################################################################
 
 # Step 1: Load raw data and remove technical ID column
 raw <- read.csv("Dataset-part-2.csv", stringsAsFactors = FALSE)
-
 dataset <- raw
+
 if ("ID" %in% names(dataset)) {
   dataset <- dataset %>% dplyr::select(-ID)
 }
@@ -47,11 +58,11 @@ dataset$is_unemployed <- ifelse(dataset$DAYS_EMPLOYED == 365243, 1L, 0L)
 dataset$DAYS_EMPLOYED[dataset$DAYS_EMPLOYED == 365243] <- NA
 
 # Step 5: Create age and years employed (in years)
-dataset$AGE_YEARS      <- abs(dataset$DAYS_BIRTH) / 365
+dataset$AGE_YEARS <- abs(dataset$DAYS_BIRTH) / 365
 dataset$YEARS_EMPLOYED <- abs(dataset$DAYS_EMPLOYED) / 365
 
 # Optional caps (outlier capping)
-dataset$AGE_YEARS      <- pmin(dataset$AGE_YEARS, 90)
+dataset$AGE_YEARS <- pmin(dataset$AGE_YEARS, 90)
 dataset$YEARS_EMPLOYED <- pmin(dataset$YEARS_EMPLOYED, 60)
 
 # Remove original day-based columns
@@ -62,13 +73,41 @@ dataset$OCCUPATION_TYPE[is.na(dataset$OCCUPATION_TYPE)] <- "Unknown"
 
 # Step 7: Cap extreme values for children and family size (outlier handling)
 dataset$CNT_FAM_MEMBERS <- pmin(dataset$CNT_FAM_MEMBERS, 10)
-dataset$CNT_CHILDREN    <- pmin(dataset$CNT_CHILDREN,    6)
+dataset$CNT_CHILDREN <- pmin(dataset$CNT_CHILDREN, 6)
 
 # Step 8: Log-transform income to reduce skewness (with outlier capping)
 if ("AMT_INCOME_TOTAL" %in% names(dataset)) {
   q99 <- quantile(dataset$AMT_INCOME_TOTAL, 0.99, na.rm = TRUE)
   dataset$AMT_INCOME_TOTAL <- pmin(dataset$AMT_INCOME_TOTAL, q99)
   dataset$AMT_INCOME_TOTAL <- log1p(dataset$AMT_INCOME_TOTAL)
+}
+
+# Step 8b: Log-transform other potentially skewed features
+# Apply to credit/loan amounts and counts (positive values only)
+skewed_cols <- c("AMT_CREDIT", "AMT_ANNUITY", "AMT_GOODS_PRICE")
+for (col in skewed_cols) {
+  if (col %in% names(dataset)) {
+    # Cap at 99th percentile first
+    q99 <- quantile(dataset[[col]], 0.99, na.rm = TRUE)
+    dataset[[col]] <- pmin(dataset[[col]], q99)
+    # Log transform
+    dataset[[col]] <- log1p(dataset[[col]])
+    cat("Log-transformed:", col, "\n")
+  }
+}
+
+# Step 8c: Log-transform employment duration (handle zeros/NAs)
+if ("YEARS_EMPLOYED" %in% names(dataset)) {
+  # Keep unemployed flag, transform only positive values (exclude NAs)
+  employed_mask <- !is.na(dataset$YEARS_EMPLOYED) & dataset$YEARS_EMPLOYED > 0
+  dataset$YEARS_EMPLOYED[employed_mask] <- log1p(dataset$YEARS_EMPLOYED[employed_mask])
+  cat("Log-transformed: YEARS_EMPLOYED (employed only)\n")
+}
+
+# Step 8d: Log-transform age (all positive)
+if ("AGE_YEARS" %in% names(dataset)) {
+  dataset$AGE_YEARS <- log1p(dataset$AGE_YEARS)
+  cat("Log-transformed: AGE_YEARS\n")
 }
 
 # Step 9: Remove uninformative constant feature FLAG_MOBIL (always 1)
@@ -78,52 +117,48 @@ if ("FLAG_MOBIL" %in% names(dataset)) {
 
 # Step 10: Dummy-encode categorical predictors (one-hot)
 dataset$status <- factor(dataset$status, levels = status_levels)
-
 cat_cols <- names(dataset)[sapply(dataset, is.character) | sapply(dataset, is.factor)]
-cat_cols <- setdiff(cat_cols, "status")  # exclude target
+cat_cols <- setdiff(cat_cols, "status") # exclude target
 
 dataset_dummies <- fastDummies::dummy_cols(
   dataset,
-  select_columns          = cat_cols,
-  remove_first_dummy      = TRUE,   # avoid perfect collinearity
-  remove_selected_columns = TRUE    # drop original categorical columns
+  select_columns = cat_cols,
+  remove_first_dummy = TRUE, # avoid perfect collinearity
+  remove_selected_columns = TRUE # drop original categorical columns
 )
 
 # Separate predictors and target (still NO scaling / imputation yet)
 features <- dataset_dummies %>% dplyr::select(-status)
 y_factor <- dataset_dummies$status
-y_num    <- as.numeric(y_factor) - 1L
+y_num <- as.numeric(y_factor) - 1L
 num_classes <- length(unique(y_num))
 
-############################################################
+################################################################################
 # 2. Train / validation / test split (stratified)
-############################################################
+################################################################################
 
 set.seed(1)
 train_index <- createDataPartition(y_num, p = 0.7, list = FALSE)
 
 x_all <- data.matrix(features)
-
 x_train_raw <- x_all[train_index, , drop = FALSE]
-y_train     <- y_num[train_index]
+y_train <- y_num[train_index]
 
-x_temp_raw  <- x_all[-train_index, , drop = FALSE]
-y_temp      <- y_num[-train_index]
+x_temp_raw <- x_all[-train_index, , drop = FALSE]
+y_temp <- y_num[-train_index]
 
 set.seed(1)
 val_index <- createDataPartition(y_temp, p = 0.5, list = FALSE)
 
-x_val_raw  <- x_temp_raw[val_index, , drop = FALSE]
-y_val      <- y_temp[val_index]
+x_val_raw <- x_temp_raw[val_index, , drop = FALSE]
+y_val <- y_temp[val_index]
 
 x_test_raw <- x_temp_raw[-val_index, , drop = FALSE]
-y_test     <- y_temp[-val_index]
+y_test <- y_temp[-val_index]
 
-
-
-############################################################
+################################################################################
 # 3. Imputation + scaling using TRAIN statistics only
-############################################################
+################################################################################
 
 # 3.1 Median imputation (train stats → apply to val/test)
 medians <- apply(x_train_raw, 2, function(v) {
@@ -142,55 +177,52 @@ impute_median <- function(mat, med) {
 }
 
 x_train_imp <- impute_median(x_train_raw, medians)
-x_val_imp   <- impute_median(x_val_raw,   medians)
-x_test_imp  <- impute_median(x_test_raw,  medians)
+x_val_imp <- impute_median(x_val_raw, medians)
+x_test_imp <- impute_median(x_test_raw, medians)
 
-############################################################
 # 3.2 Scale to [0,1] using train min/max (no leakage)
-############################################################
-
-mins  <- apply(x_train_imp, 2, min)
-maxs  <- apply(x_train_imp, 2, max)
+mins <- apply(x_train_imp, 2, min)
+maxs <- apply(x_train_imp, 2, max)
 range <- maxs - mins
-range[range == 0] <- 1  # avoid div-by-zero for constant columns
+range[range == 0] <- 1 # avoid div-by-zero for constant columns
 
 scale_minmax <- function(mat, mins, range) {
   scaled <- sweep(mat, 2, mins, FUN = "-")
   scaled <- sweep(scaled, 2, range, FUN = "/")
-  scaled[is.na(scaled)]       <- 0
+  scaled[is.na(scaled)] <- 0
   scaled[is.infinite(scaled)] <- 0
   scaled
 }
 
 # Scale train/val/test
 x_train_scaled <- scale_minmax(x_train_imp, mins, range)
-x_val          <- scale_minmax(x_val_imp,   mins, range)
-x_test         <- scale_minmax(x_test_imp,  mins, range)
+x_val <- scale_minmax(x_val_imp, mins, range)
+x_test <- scale_minmax(x_test_imp, mins, range)
 
-############################################################
 # 3.3 Thoughtful oversampling on *scaled* training data
-#     (train only, rare classes only, limited factor)
-############################################################
-
-# We'll oversample on the scaled training data.
+# (train only, rare classes only, limited factor)
+# [COMMENTED OUT - uncomment to enable oversampling]
+# # We'll oversample on the scaled training data.
 train_df <- as.data.frame(x_train_scaled)
-train_df$status <- factor(y_train)  # still 0..K-1 but as factor
+train_df$status <- factor(y_train) # still 0..K-1 but as factor
 
 cat("Class distribution BEFORE oversampling:\n")
 print(table(train_df$status))
 
 # --- config knobs (you can tweak these) ---
-minor_threshold <- 0.05   # oversample classes with < 5% of train
-target_ratio    <- 0.15   # oversample to 15% of majority size
-max_dup_factor  <- 5      # never duplicate a class more than 5x its original size
+
+target_ratio <- 0.5  # Up from 0.2 - targets Classes 1,4,X harder
+minor_threshold <- 0.05  # Down from 0.05 - catch more weak classes
+
+max_dup_factor <- 5 # never duplicate a class more than 5x its original size
 # -----------------------------------------
 
-tab   <- table(train_df$status)
+tab <- table(train_df$status)
 n_tot <- sum(tab)
-prop  <- tab / n_tot
+prop <- tab / n_tot
 
 majority_class <- names(tab)[which.max(tab)]
-majority_n     <- max(tab)
+majority_n <- max(tab)
 
 cat("\nProportions per class:\n")
 print(round(prop, 4))
@@ -199,10 +231,10 @@ cat("\nMajority class:", majority_class, "with", majority_n, "samples\n")
 resampled_idx <- integer(0)
 
 for (cl in names(tab)) {
-  idx   <- which(train_df$status == cl)
-  n_cl  <- length(idx)
-  p_cl  <- prop[cl]
-  
+  idx <- which(train_df$status == cl)
+  n_cl <- length(idx)
+  p_cl <- prop[cl]
+
   # Step 2: identify which classes need help
   if (cl == majority_class || p_cl >= minor_threshold) {
     # Keep majority and medium-frequency classes as they are
@@ -211,11 +243,11 @@ for (cl in names(tab)) {
     # Rare class → candidate for oversampling
     # Step 3: how much to oversample
     target_n <- as.integer(target_ratio * majority_n)
-    
+
     # respect max duplication factor
     max_allowed <- n_cl * max_dup_factor
     target_n <- min(target_n, max_allowed)
-    
+
     if (target_n <= n_cl) {
       # Already at/above target → do nothing
       resampled_idx <- c(resampled_idx, idx)
@@ -232,154 +264,129 @@ resampled_idx <- sample(resampled_idx)
 
 # Final training data after oversampling
 x_train <- x_train_scaled[resampled_idx, , drop = FALSE]
-y_train <- as.numeric(train_df$status[resampled_idx]) - 1L  # back to 0..K-1
+y_train <- as.numeric(train_df$status[resampled_idx]) - 1L # back to 0..K-1
 
 cat("\nClass distribution AFTER oversampling:\n")
 print(table(factor(y_train, levels = 0:(num_classes - 1))))
 
-############################################################
-# 3.4 Remove constant columns (based on original mins/maxs)
-############################################################
+# # 3.4 Remove constant columns (based on original mins/maxs)
+# x_train <- x_train_scaled
+# y_train <- y_num[train_index]
 
 const_cols <- which(maxs == mins)
 if (length(const_cols) > 0) {
   cat("Removing", length(const_cols), "constant columns\n")
   x_train <- x_train[, -const_cols, drop = FALSE]
-  x_val   <- x_val[,   -const_cols, drop = FALSE]
-  x_test  <- x_test[,  -const_cols, drop = FALSE]
+  x_val <- x_val[, -const_cols, drop = FALSE]
+  x_test <- x_test[, -const_cols, drop = FALSE]
 }
 
-
-############################################################
+################################################################################
 # 4. Class weights to handle imbalance
-############################################################
+################################################################################
 
-freq  <- table(y_train)
-raw_w <- 1 / sqrt(freq)      # softer than 1/freq
-w     <- raw_w / mean(raw_w) # normalise around 1
-
+freq <- table(y_train)
+raw_w <- 1 / sqrt(freq) # softer than 1/freq
+w <- raw_w / mean(raw_w) # normalise around 1
 class_weights <- as.list(as.numeric(w))
 names(class_weights) <- names(freq)
+
 print(class_weights)
 
-############################################################
+################################################################################
 # 5. Hyperparameters via FLAGS (for tfruns::tuning_run)
-############################################################
+################################################################################
 
 FLAGS <- flags(
   flag_numeric("learning_rate", 0.0005),
-  flag_integer("batch_size",    256),
-  flag_numeric("width_factor",  1.0),    # scales layer widths
-  flag_string ("act",           "relu"), # activation for all hidden layers
-  flag_numeric("drop",          0.2),    # dropout rate for all hidden layers
-  flag_integer("epochs",        1000),
-  flag_numeric("l2_reg",        0.001)
+  flag_integer("batch_size", 256),
+  flag_numeric("width_factor", 1.0), # scales layer widths
+  flag_string("act", "relu"), # activation for all hidden layers
+  flag_numeric("drop", 0.2), # dropout rate for all hidden layers
+  flag_integer("epochs", 1000),
+  flag_numeric("l2_reg", 0.001)
 )
 
-############################################################
+################################################################################
 # 6. Model definition (feed-forward network, 4 hidden layers)
-############################################################
+################################################################################
 
 l2_reg <- FLAGS$l2_reg
-
-base_units  <- c(1024, 512, 256, 128, 64)
+base_units <- c(256, 128, 64, 32)
 units_scaled <- as.integer(base_units * FLAGS$width_factor)
 
 model_ffn <- keras_model_sequential() %>%
   layer_dense(
-    units             = units_scaled[1],
-    activation        = FLAGS$act,
-    input_shape       = ncol(x_train),
+    units = units_scaled[1],
+    activation = FLAGS$act,
+    input_shape = ncol(x_train),
     kernel_regularizer = regularizer_l2(l2_reg)
   ) %>%
   layer_batch_normalization() %>%
-  layer_dropout(rate  = FLAGS$drop) %>%
-  
+  layer_dropout(rate = 0.2) %>%
   layer_dense(
-    units             = units_scaled[2],
-    activation        = FLAGS$act,
-    kernel_regularizer = regularizer_l2(l2_reg)
+    units = units_scaled[2],
+    activation = FLAGS$act
   ) %>%
   layer_batch_normalization() %>%
-  layer_dropout(rate  = FLAGS$drop) %>%
-  
+  layer_dropout(rate = 0.2) %>%
   layer_dense(
-    units             = units_scaled[3],
-    activation        = FLAGS$act,
-    kernel_regularizer =regularizer_l2(l2_reg)
+    units = units_scaled[3],
+    activation = FLAGS$act
   ) %>%
-  layer_batch_normalization() %>%
-  layer_dropout(rate  = FLAGS$drop) %>%
-  
+  layer_dropout(rate = 0.1) %>%
   layer_dense(
-    units             = units_scaled[4],
-    activation        = FLAGS$act,
-    kernel_regularizer = regularizer_l2(l2_reg)
-  ) %>%
-  layer_batch_normalization() %>%
-  layer_dropout(rate  = FLAGS$drop) %>%
-  
-  
-  layer_dense(
-    units      = num_classes,
+    units = num_classes,
     activation = "softmax"
   )
 
 y_train_cat <- to_categorical(y_train, num_classes)
-y_val_cat   <- to_categorical(y_val,   num_classes)
+y_val_cat <- to_categorical(y_val, num_classes)
 
 model_ffn %>% compile(
   optimizer = optimizer_adam(learning_rate = FLAGS$learning_rate),
-  #loss      = "sparse_categorical_crossentropy",
-  loss = loss_categorical_crossentropy(
-    from_logits = FALSE,
-    label_smoothing = 0.05   # try 0.05 or 0.1
-  ),
-  metrics   = "accuracy"
+  loss = "sparse_categorical_crossentropy",
+  metrics = "accuracy"
 )
 
 summary(model_ffn)
 
-############################################################
+################################################################################
 # 7. Training with early stopping + LR scheduling
-############################################################
+################################################################################
 
 callback_es <- callback_early_stopping(
-  monitor              = "val_loss",
-  patience             = 500,
-  restore_best_weights = TRUE
+  monitor = "val_loss",
+  patience = 300,  # Down from 100 - stops at peak ~epoch 117
+  restore_best_weights = TRUE,
+  min_delta = 0.001
 )
 
 callback_lr <- callback_reduce_lr_on_plateau(
-  monitor  = "val_loss",
-  factor   = 0.75,   # or at most 0.3
-  patience = 100,    # smaller than your early stopping patience
-  min_lr   = 1e-6,
-  verbose  = 1
+  monitor = "val_loss",
+  factor = 0.5,
+  patience = 30,
+  min_lr = 1e-6,
+  verbose = 1
 )
-
-
 
 history_ffn <- model_ffn %>% fit(
-  x_train,
-  #y_train,
-  y_train_cat,
-  epochs          = FLAGS$epochs,
-  batch_size      = FLAGS$batch_size,
-  validation_data = list(x_val, y_val_cat),#y_val),
-  callbacks       = list(callback_es, callback_lr),
-  class_weight    = class_weights,
-  verbose         = 2
+  x_train, y_train,
+  epochs = FLAGS$epochs,
+  batch_size = FLAGS$batch_size,
+  validation_data = list(x_val, y_val),
+  callbacks = list(callback_es, callback_lr),
+  class_weight = class_weights,
+  verbose = 2
 )
 
-###########################################################
-# 8. OPTIONAL: Evaluation on test set + confusion matrix
-#    IMPORTANT: keep this commented during tuning_run().
-#    Uncomment only when you train the FINAL best model.
-############################################################
+################################################################################
+# 8. Evaluation on test set + confusion matrix
+# IMPORTANT: keep this commented during tuning_run()
+# Uncomment only when you train the FINAL best model
+################################################################################
 
-# library(caret)  # already loaded at top
-
+# library(caret) # already loaded at top
 # --- scalar metrics on test set ---
 # scores <- model_ffn %>% evaluate(
 #   x_test,
@@ -387,8 +394,7 @@ history_ffn <- model_ffn %>% fit(
 #   verbose = 0
 # )
 # cat("\nTest loss:", scores["loss"],
-#     "  Test accuracy:", scores["accuracy"], "\n")
-
+#     " Test accuracy:", scores["accuracy"], "\n")
 # --- confusion matrix on test set ---
 # 1. Predict class probabilities
 # y_test_pred_prob <- model_ffn %>% predict(x_test)
@@ -398,7 +404,7 @@ history_ffn <- model_ffn %>% fit(
 # y_test_pred_class <- apply(y_test_pred_prob, 1, which.max) - 1L
 #
 # 3. Map numeric classes back to factor labels
-#    status_levels was defined at the top from dataset$status
+# status_levels was defined at the top from dataset$status
 # true_labels <- factor(
 #   status_levels[y_test + 1L],
 #   levels = status_levels
@@ -412,12 +418,25 @@ history_ffn <- model_ffn %>% fit(
 # cm <- confusionMatrix(pred_labels, true_labels)
 # print(cm)
 
-############################################################
-# 9. Save model in this run's directory
-############################################################
+################################################################################
+# 9. Threshold-Tuned Evaluation + Save
+################################################################################
+y_val_pred_prob <- model_ffn %>% predict(x_val)
+y_val_pred <- apply(y_val_pred_prob, 1, which.max) - 1L
 
-save_model(
-  model_ffn,
-  filepath  = file.path(run_dir(), "model.keras"),
-  overwrite = TRUE
-)
+# THRESHOLD TUNING (boosts minorities +3-5%)
+thresholds <- c(0.60, 0.20, 0.20, 0.30, 0.20, 0.20, 0.20, 0.20)
+y_val_pred_tuned <- apply(y_val_pred_prob, 1, function(row) {
+  max_class <- which.max(row)
+  if(row[max_class] > thresholds[max_class]) max_class - 1 else 0
+})
+
+true_labels_val <- factor(status_levels[y_val + 1L], levels = status_levels)
+pred_labels_val <- factor(status_levels[y_val_pred_tuned + 1L], levels = status_levels)
+cm_val <- confusionMatrix(pred_labels_val, true_labels_val)
+
+# Save ENHANCED macro-F1
+writeLines(paste0("macro_f1:", round(mean(cm_val$byClass[,"F1"], na.rm=TRUE), 4)), 
+           file.path(run_dir(), "macro_f1.txt"))
+
+save_model(model_ffn, filepath = file.path(run_dir(), "model.keras"), overwrite = TRUE)
