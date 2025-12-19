@@ -15,18 +15,18 @@ runs <- tuning_run(
   sample   = 1.0,  # Run all combinations (20 total)
   flags = list(
     # Optimizer hyperparameters
-    learning_rate = c(0.0003),      # 2 options
+    learning_rate = c(0.05),      # 2 options
     batch_size    = c(128),    
     l2_reg        = c(0.00001),# 1 option (fixed)
   
     # Architecture scaling factor
-    width_factor  = c(1.5),          # 2 options
+    #width_factor  = c(1.5),          # 2 options
     
     # Activation function
     act = c("relu"),                 # 2 options
     
     # Dropout rate
-    drop = c(0.15),               # 3 options
+    #drop = c(0.15),               # 3 options
     
     # Training epochs
     epochs = 5000  # Let early stopping handle this
@@ -97,8 +97,8 @@ overfitting_check <- runs %>%
   ) %>%
   select(
     run_dir,
-    flag_drop,
-    flag_width_factor,
+    #flag_drop,
+    #flag_width_factor,
     metric_val_accuracy,
     acc_gap
   ) %>%
@@ -127,17 +127,17 @@ cat("Validation Loss:", round(best_run$metric_val_loss, 4), "\n\n")
 cat("Best Hyperparameters:\n")
 cat("  - learning_rate:", best_run$flag_learning_rate, "\n")
 cat("  - batch_size:", best_run$flag_batch_size, "\n")
-cat("  - width_factor:", best_run$flag_width_factor, "\n")
+#cat("  - width_factor:", best_run$flag_width_factor, "\n")
 cat("  - activation:", best_run$flag_act, "\n")
-cat("  - dropout:", best_run$flag_drop, "\n")
+#cat("  - dropout:", best_run$flag_drop, "\n")
 
 # Save best configuration to file
 best_config <- list(
   learning_rate = best_run$flag_learning_rate,
   batch_size = best_run$flag_batch_size,
-  width_factor = best_run$flag_width_factor,
+  #width_factor = best_run$flag_width_factor,
   act = best_run$flag_act,
-  drop = best_run$flag_drop,
+  #drop = best_run$flag_drop,
   val_accuracy = best_run$metric_val_accuracy,
   val_loss = best_run$metric_val_loss,
   run_dir = best_run$run_dir
@@ -187,9 +187,9 @@ cat("     'nn_experiment.R',\n")
 cat("     flags = list(\n")
 cat("       learning_rate =", best_run$flag_learning_rate, ",\n")
 cat("       batch_size =", best_run$flag_batch_size, ",\n")
-cat("       width_factor =", best_run$flag_width_factor, ",\n")
+#cat("       width_factor =", best_run$flag_width_factor, ",\n")
 cat("       act = '", best_run$flag_act, "',\n", sep="")
-cat("       drop =", best_run$flag_drop, ",\n")
+#cat("       drop =", best_run$flag_drop, ",\n")
 cat("       epochs = 5000\n")
 cat("     )\n")
 cat("   )\n\n")

@@ -75,40 +75,40 @@ dataset$OCCUPATION_TYPE[is.na(dataset$OCCUPATION_TYPE)] <- "Unknown"
 dataset$CNT_FAM_MEMBERS <- pmin(dataset$CNT_FAM_MEMBERS, 10)
 dataset$CNT_CHILDREN <- pmin(dataset$CNT_CHILDREN, 6)
 
-# Step 8: Log-transform income to reduce skewness (with outlier capping)
-if ("AMT_INCOME_TOTAL" %in% names(dataset)) {
-  q99 <- quantile(dataset$AMT_INCOME_TOTAL, 0.99, na.rm = TRUE)
-  dataset$AMT_INCOME_TOTAL <- pmin(dataset$AMT_INCOME_TOTAL, q99)
-  dataset$AMT_INCOME_TOTAL <- log1p(dataset$AMT_INCOME_TOTAL)
-}
-
-# Step 8b: Log-transform other potentially skewed features
-# Apply to credit/loan amounts and counts (positive values only)
-skewed_cols <- c("AMT_CREDIT", "AMT_ANNUITY", "AMT_GOODS_PRICE")
-for (col in skewed_cols) {
-  if (col %in% names(dataset)) {
-    # Cap at 99th percentile first
-    q99 <- quantile(dataset[[col]], 0.99, na.rm = TRUE)
-    dataset[[col]] <- pmin(dataset[[col]], q99)
-    # Log transform
-    dataset[[col]] <- log1p(dataset[[col]])
-    cat("Log-transformed:", col, "\n")
-  }
-}
-
-# Step 8c: Log-transform employment duration (handle zeros/NAs)
-if ("YEARS_EMPLOYED" %in% names(dataset)) {
-  # Keep unemployed flag, transform only positive values (exclude NAs)
-  employed_mask <- !is.na(dataset$YEARS_EMPLOYED) & dataset$YEARS_EMPLOYED > 0
-  dataset$YEARS_EMPLOYED[employed_mask] <- log1p(dataset$YEARS_EMPLOYED[employed_mask])
-  cat("Log-transformed: YEARS_EMPLOYED (employed only)\n")
-}
-
-# Step 8d: Log-transform age (all positive)
-if ("AGE_YEARS" %in% names(dataset)) {
-  dataset$AGE_YEARS <- log1p(dataset$AGE_YEARS)
-  cat("Log-transformed: AGE_YEARS\n")
-}
+# # Step 8: Log-transform income to reduce skewness (with outlier capping)
+# if ("AMT_INCOME_TOTAL" %in% names(dataset)) {
+#   q99 <- quantile(dataset$AMT_INCOME_TOTAL, 0.99, na.rm = TRUE)
+#   dataset$AMT_INCOME_TOTAL <- pmin(dataset$AMT_INCOME_TOTAL, q99)
+#   dataset$AMT_INCOME_TOTAL <- log1p(dataset$AMT_INCOME_TOTAL)
+# }
+# 
+# # Step 8b: Log-transform other potentially skewed features
+# # Apply to credit/loan amounts and counts (positive values only)
+# skewed_cols <- c("AMT_CREDIT", "AMT_ANNUITY", "AMT_GOODS_PRICE")
+# for (col in skewed_cols) {
+#   if (col %in% names(dataset)) {
+#     # Cap at 99th percentile first
+#     q99 <- quantile(dataset[[col]], 0.99, na.rm = TRUE)
+#     dataset[[col]] <- pmin(dataset[[col]], q99)
+#     # Log transform
+#     dataset[[col]] <- log1p(dataset[[col]])
+#     cat("Log-transformed:", col, "\n")
+#   }
+# }
+# 
+# # Step 8c: Log-transform employment duration (handle zeros/NAs)
+# if ("YEARS_EMPLOYED" %in% names(dataset)) {
+#   # Keep unemployed flag, transform only positive values (exclude NAs)
+#   employed_mask <- !is.na(dataset$YEARS_EMPLOYED) & dataset$YEARS_EMPLOYED > 0
+#   dataset$YEARS_EMPLOYED[employed_mask] <- log1p(dataset$YEARS_EMPLOYED[employed_mask])
+#   cat("Log-transformed: YEARS_EMPLOYED (employed only)\n")
+# }
+# 
+# # Step 8d: Log-transform age (all positive)
+# if ("AGE_YEARS" %in% names(dataset)) {
+#   dataset$AGE_YEARS <- log1p(dataset$AGE_YEARS)
+#   cat("Log-transformed: AGE_YEARS\n")
+# }
 
 # Step 9: Remove uninformative constant feature FLAG_MOBIL (always 1)
 if ("FLAG_MOBIL" %in% names(dataset)) {
@@ -177,27 +177,28 @@ impute_median <- function(mat, med) {
 }
 
 x_train_imp <- impute_median(x_train_raw, medians)
-x_val_imp <- impute_median(x_val_raw, medians)
-x_test_imp <- impute_median(x_test_raw, medians)
+x_val_imp   <- impute_median(x_val_raw,   medians)
+x_test_imp  <- impute_median(x_test_raw,  medians)
 
-# 3.2 Scale to [0,1] using train min/max (no leakage)
+# 3.2 Min–max scaling to [0,1] using TRAIN statistics only
 mins <- apply(x_train_imp, 2, min)
 maxs <- apply(x_train_imp, 2, max)
-range <- maxs - mins
-range[range == 0] <- 1 # avoid div-by-zero for constant columns
 
-scale_minmax <- function(mat, mins, range) {
-  scaled <- sweep(mat, 2, mins, FUN = "-")
-  scaled <- sweep(scaled, 2, range, FUN = "/")
-  scaled[is.na(scaled)] <- 0
-  scaled[is.infinite(scaled)] <- 0
+# Avoid division by zero (constant columns)
+same <- which(maxs == mins)
+maxs[same] <- mins[same] + 1
+
+scale_minmax <- function(mat, mins, maxs) {
+  scaled <- sweep(mat, 2, mins, "-")
+  scaled <- sweep(scaled, 2, (maxs - mins), "/")
   scaled
 }
 
-# Scale train/val/test
-x_train_scaled <- scale_minmax(x_train_imp, mins, range)
-x_val <- scale_minmax(x_val_imp, mins, range)
-x_test <- scale_minmax(x_test_imp, mins, range)
+x_train_scaled <- scale_minmax(x_train_imp, mins, maxs)
+x_val          <- scale_minmax(x_val_imp,   mins, maxs)
+x_test         <- scale_minmax(x_test_imp,  mins, maxs)
+
+
 
 # 3.3 Thoughtful oversampling on *scaled* training data
 # (train only, rare classes only, limited factor)
@@ -211,8 +212,8 @@ print(table(train_df$status))
 
 # --- config knobs (you can tweak these) ---
 
-target_ratio <- 0.5  # Up from 0.2 - targets Classes 1,4,X harder
-minor_threshold <- 0.05  # Down from 0.05 - catch more weak classes
+target_ratio <- 0.25# Up from 0.2 - targets Classes 1,4,X harder
+minor_threshold <- 0.08  # Down from 0.05 - catch more weak classes
 
 max_dup_factor <- 5 # never duplicate a class more than 5x its original size
 # -----------------------------------------
@@ -285,13 +286,13 @@ if (length(const_cols) > 0) {
 # 4. Class weights to handle imbalance
 ################################################################################
 
-freq <- table(y_train)
-raw_w <- 1 / sqrt(freq) # softer than 1/freq
-w <- raw_w / mean(raw_w) # normalise around 1
-class_weights <- as.list(as.numeric(w))
-names(class_weights) <- names(freq)
-
-print(class_weights)
+# freq <- table(y_train)
+# raw_w <- 1 / sqrt(freq) # softer than 1/freq
+# w <- raw_w / mean(raw_w) # normalise around 1
+# class_weights <- as.list(as.numeric(w))
+# names(class_weights) <- names(freq)
+# 
+# print(class_weights)
 
 ################################################################################
 # 5. Hyperparameters via FLAGS (for tfruns::tuning_run)
@@ -300,9 +301,9 @@ print(class_weights)
 FLAGS <- flags(
   flag_numeric("learning_rate", 0.0005),
   flag_integer("batch_size", 256),
-  flag_numeric("width_factor", 1.0), # scales layer widths
+  #flag_numeric("width_factor", 1.0), # scales layer widths
   flag_string("act", "relu"), # activation for all hidden layers
-  flag_numeric("drop", 0.2), # dropout rate for all hidden layers
+  #flag_numeric("drop", 0.2), # dropout rate for all hidden layers
   flag_integer("epochs", 1000),
   flag_numeric("l2_reg", 0.001)
 )
@@ -312,28 +313,28 @@ FLAGS <- flags(
 ################################################################################
 
 l2_reg <- FLAGS$l2_reg
-base_units <- c(256, 128, 64, 32)
-units_scaled <- as.integer(base_units * FLAGS$width_factor)
+base_units <- c(256,128,64)
+units_scaled <- base_units #as.integer(base_units * FLAGS$width_factor)
 
 model_ffn <- keras_model_sequential() %>%
   layer_dense(
     units = units_scaled[1],
     activation = FLAGS$act,
     input_shape = ncol(x_train),
-    kernel_regularizer = regularizer_l2(l2_reg)
+    #kernel_regularizer = regularizer_l2(l2_reg)
   ) %>%
-  layer_batch_normalization() %>%
-  layer_dropout(rate = 0.2) %>%
+  # layer_batch_normalization() %>%
+   layer_dropout(rate = 0.3) %>%
   layer_dense(
     units = units_scaled[2],
     activation = FLAGS$act
   ) %>%
-  layer_batch_normalization() %>%
+  #layer_batch_normalization() %>%
   layer_dropout(rate = 0.2) %>%
-  layer_dense(
-    units = units_scaled[3],
-    activation = FLAGS$act
-  ) %>%
+   layer_dense(
+     units = units_scaled[3],
+     activation = FLAGS$act
+   ) %>%
   layer_dropout(rate = 0.1) %>%
   layer_dense(
     units = num_classes,
@@ -344,8 +345,9 @@ y_train_cat <- to_categorical(y_train, num_classes)
 y_val_cat <- to_categorical(y_val, num_classes)
 
 model_ffn %>% compile(
-  optimizer = optimizer_adam(learning_rate = FLAGS$learning_rate),
-  loss = "sparse_categorical_crossentropy",
+  optimizer = optimizer_sgd(learning_rate = FLAGS$learning_rate,  momentum = 0.9,
+                            nesterov = TRUE),
+  loss = "categorical_crossentropy",
   metrics = "accuracy"
 )
 
@@ -357,7 +359,7 @@ summary(model_ffn)
 
 callback_es <- callback_early_stopping(
   monitor = "val_loss",
-  patience = 300,  # Down from 100 - stops at peak ~epoch 117
+  patience = 500, 
   restore_best_weights = TRUE,
   min_delta = 0.001
 )
@@ -365,18 +367,18 @@ callback_es <- callback_early_stopping(
 callback_lr <- callback_reduce_lr_on_plateau(
   monitor = "val_loss",
   factor = 0.5,
-  patience = 30,
-  min_lr = 1e-6,
+  patience = 100,
+  min_lr = 1e-4,
   verbose = 1
 )
 
 history_ffn <- model_ffn %>% fit(
-  x_train, y_train,
+  x_train, y_train_cat,
   epochs = FLAGS$epochs,
   batch_size = FLAGS$batch_size,
-  validation_data = list(x_val, y_val),
+  validation_data = list(x_val, y_val_cat),
   callbacks = list(callback_es, callback_lr),
-  class_weight = class_weights,
+  class_weight = NULL, #class_weights,
   verbose = 2
 )
 
@@ -419,24 +421,11 @@ history_ffn <- model_ffn %>% fit(
 # print(cm)
 
 ################################################################################
-# 9. Threshold-Tuned Evaluation + Save
+# 9.  Save
 ################################################################################
-y_val_pred_prob <- model_ffn %>% predict(x_val)
-y_val_pred <- apply(y_val_pred_prob, 1, which.max) - 1L
-
-# THRESHOLD TUNING (boosts minorities +3-5%)
-thresholds <- c(0.60, 0.20, 0.20, 0.30, 0.20, 0.20, 0.20, 0.20)
-y_val_pred_tuned <- apply(y_val_pred_prob, 1, function(row) {
-  max_class <- which.max(row)
-  if(row[max_class] > thresholds[max_class]) max_class - 1 else 0
-})
-
-true_labels_val <- factor(status_levels[y_val + 1L], levels = status_levels)
-pred_labels_val <- factor(status_levels[y_val_pred_tuned + 1L], levels = status_levels)
-cm_val <- confusionMatrix(pred_labels_val, true_labels_val)
-
-# Save ENHANCED macro-F1
-writeLines(paste0("macro_f1:", round(mean(cm_val$byClass[,"F1"], na.rm=TRUE), 4)), 
-           file.path(run_dir(), "macro_f1.txt"))
-
-save_model(model_ffn, filepath = file.path(run_dir(), "model.keras"), overwrite = TRUE)
+# Save final model
+save_model(
+  model_ffn,
+  filepath = file.path(run_dir(), "model.keras"),
+  overwrite = TRUE
+)
