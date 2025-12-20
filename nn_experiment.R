@@ -305,7 +305,13 @@ FLAGS <- flags(
   flag_string("act", "relu"), # activation for all hidden layers
   #flag_numeric("drop", 0.2), # dropout rate for all hidden layers
   flag_integer("epochs", 1000),
-  flag_numeric("l2_reg", 0.001)
+  flag_numeric("l2_reg", 0.001),
+  flag_integer("u1", 256),
+  flag_integer("u2", 256),
+  flag_integer("u3", 256),
+  flag_numeric("drop1", 0.5),
+  flag_numeric("drop2", 0.5),
+  flag_numeric("drop3", 0.5)
 )
 
 ################################################################################
@@ -313,7 +319,7 @@ FLAGS <- flags(
 ################################################################################
 
 l2_reg <- FLAGS$l2_reg
-base_units <- c(256,128,64)
+base_units <- c(FLAGS$u1,FLAGS$u2,FLAGS$u3)
 units_scaled <- base_units #as.integer(base_units * FLAGS$width_factor)
 
 model_ffn <- keras_model_sequential() %>%
@@ -324,18 +330,18 @@ model_ffn <- keras_model_sequential() %>%
     #kernel_regularizer = regularizer_l2(l2_reg)
   ) %>%
   # layer_batch_normalization() %>%
-   layer_dropout(rate = 0.3) %>%
+  layer_dropout(rate = FLAGS$drop1) %>%
   layer_dense(
     units = units_scaled[2],
     activation = FLAGS$act
   ) %>%
   #layer_batch_normalization() %>%
-  layer_dropout(rate = 0.2) %>%
+  layer_dropout(rate = FLAGS$drop2) %>%
    layer_dense(
      units = units_scaled[3],
      activation = FLAGS$act
    ) %>%
-  layer_dropout(rate = 0.1) %>%
+  layer_dropout(rate = FLAGS$drop3) %>%
   layer_dense(
     units = num_classes,
     activation = "softmax"
@@ -345,7 +351,7 @@ y_train_cat <- to_categorical(y_train, num_classes)
 y_val_cat <- to_categorical(y_val, num_classes)
 
 model_ffn %>% compile(
-  optimizer = optimizer_sgd(learning_rate = FLAGS$learning_rate,  momentum = 0.9,
+  optimizer = optimizer_sgd(learning_rate = FLAGS$learning_rate,  momentum = 0.97,
                             nesterov = TRUE),
   loss = "categorical_crossentropy",
   metrics = "accuracy"

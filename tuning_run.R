@@ -15,9 +15,14 @@ runs <- tuning_run(
   sample   = 1.0,  # Run all combinations (20 total)
   flags = list(
     # Optimizer hyperparameters
-    learning_rate = c(0.05),      # 2 options
-    batch_size    = c(128),    
+    learning_rate = c(0.05,0.1),      # 2 options
+    batch_size    = c(128,512,64),    
     l2_reg        = c(0.00001),# 1 option (fixed)
+    
+    #Units
+    u1 = c(512,256),
+    u2 = c(512,128),
+    u3 = c(128,64),
   
     # Architecture scaling factor
     #width_factor  = c(1.5),          # 2 options
@@ -26,7 +31,9 @@ runs <- tuning_run(
     act = c("relu"),                 # 2 options
     
     # Dropout rate
-    #drop = c(0.15),               # 3 options
+    drop1 = c(0.5,0.3,0),
+    drop2= c(0.2,0),
+    drop3= c(0.2,0),# 3 options
     
     # Training epochs
     epochs = 5000  # Let early stopping handle this
