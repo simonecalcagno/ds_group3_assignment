@@ -1,0 +1,349 @@
+
+> ############################################################
+> # nn_experiment.R  (IMPROVED VERSION - NO DATA LEAKAGE)
+> # Deep FFN with categorical .... [TRUNCATED] 
+
+> ###############
+> # Libraries
+> ###############
+> if (!require("dplyr"))      install.packages("dplyr");      library(dplyr)
+
+> if (!require("caret"))      install.packages("caret");      library(caret)
+
+> if (!require("keras3"))     install.packages("keras3");     library(keras3)
+
+> if (!require("tensorflow")) install.packages("tensorflow"); library(tensorflow)
+
+> if (!require("tfruns"))     install.packages("tfruns");     library(tfruns)
+
+> if (!require("pROC"))       install.packages("pROC");       library(pROC)
+
+> ############################################################
+> # 1. DATA LOADING + BASIC PREPROCESSING
+> ########################################### .... [TRUNCATED] 
+
+> dataset <- raw
+
+> if ("ID" %in% names(dataset)) {
++   dataset <- dataset |> dplyr::select(-ID)
++ }
+
+> # Replace empty strings with NA
+> for (col in names(dataset)) {
++   if (is.character(dataset[[col]]))
++     dataset[[col]][dataset[[col]] == ""] <-  .... [TRUNCATED] 
+
+> dataset$status <- as.factor(dataset$status)
+
+> # DAYS_EMPLOYED special value
+> dataset$is_unemployed <- ifelse(dataset$DAYS_EMPLOYED == 365243, 1L, 0L)
+
+> dataset$DAYS_EMPLOYED[dataset$DAYS_EMPLOYED == 365243] <- NA
+
+> dataset$AGE            <- abs(dataset$DAYS_BIRTH) / 365
+
+> dataset$YEARS_EMPLOYED <- abs(dataset$DAYS_EMPLOYED) / 365
+
+> dataset <- dataset |> dplyr::select(-DAYS_BIRTH, -DAYS_EMPLOYED)
+
+> dataset$OCCUPATION_TYPE[is.na(dataset$OCCUPATION_TYPE)] <- "Unknown"
+
+> dataset$CNT_FAM_MEMBERS <- pmin(dataset$CNT_FAM_MEMBERS, 10)
+
+> dataset$CNT_CHILDREN    <- pmin(dataset$CNT_CHILDREN, 6)
+
+> dataset$AMT_INCOME_TOTAL <- log1p(dataset$AMT_INCOME_TOTAL)
+
+> if ("FLAG_MOBIL" %in% names(dataset))
++   dataset <- dataset |> dplyr::select(-FLAG_MOBIL)
+
+> ###############
+> # DEFINE COLUMN TYPES
+> ###############
+> 
+> embedding_cols <- c(
++   "NAME_INCOME_TYPE",
++   "NAME_EDUCATION_TYPE",
++   "NAME_FAM ..." ... [TRUNCATED] 
+
+> binary_cols <- c("CODE_GENDER", "FLAG_OWN_CAR", "FLAG_OWN_REALTY")
+
+> numeric_cols <- setdiff(
++   names(dataset),
++   c(embedding_cols, binary_cols, "status")
++ )
+
+> ###############
+> # PROCESS EMBEDDINGS (before split - no leakage here)
+> ###############
+> 
+> embedding_info <- list()
+
+> for (col in embedding_cols) {
++   dataset[[col]] <- as.factor(dataset[[col]])
++   lvls <- levels(dataset[[col]])
++   dataset[[col]] <- as.integer(da .... [TRUNCATED] 
+
+> # Binary → numeric 0/1 (before split - no leakage here)
+> dataset$CODE_GENDER    <- ifelse(dataset$CODE_GENDER == "M", 1, 0)
+
+> dataset$FLAG_OWN_CAR   <- ifelse(dataset$FLAG_OWN_CAR == "Y", 1, 0)
+
+> dataset$FLAG_OWN_REALTY<- ifelse(dataset$FLAG_OWN_REALTY == "Y", 1, 0)
+
+> # Extract target
+> y_factor <- dataset$status
+
+> y_num <- as.numeric(y_factor) - 1L
+
+> num_classes <- length(unique(y_num))
+
+> ############################################################
+> # 2. STRATIFIED TRAIN/VAL/TEST SPLIT (BEFORE SCALING!)
+> ############################ .... [TRUNCATED] 
+
+> train_index <- createDataPartition(y_num, p=0.7, list=FALSE)
+
+> # Split ALL data
+> train_data <- dataset[train_index, ]
+
+> temp_data <- dataset[-train_index, ]
+
+> y_train <- y_num[train_index]
+
+> y_temp <- y_num[-train_index]
+
+> set.seed(1)
+
+> val_index <- createDataPartition(y_temp, p=0.5, list=FALSE)
+
+> val_data <- temp_data[val_index, ]
+
+> test_data <- temp_data[-val_index, ]
+
+> y_val <- y_temp[val_index]
+
+> y_test <- y_temp[-val_index]
+
+> ############################################################
+> # 3. COMPUTE SCALING PARAMETERS ON TRAINING SET ONLY
+> ############################## .... [TRUNCATED] 
+
+> # Compute median and min/max from TRAINING data only
+> for (col in numeric_cols) {
++   scaling_params[[col]] <- list()
++   
++   # Median for imputat .... [TRUNCATED] 
+
+> ############################################################
+> # 4. APPLY SCALING TO ALL SPLITS USING TRAINING PARAMETERS
+> ######################## .... [TRUNCATED] 
+
+> # Apply to all splits
+> train_data <- apply_preprocessing(train_data, scaling_params, numeric_cols)
+
+> val_data <- apply_preprocessing(val_data, scaling_params, numeric_cols)
+
+> test_data <- apply_preprocessing(test_data, scaling_params, numeric_cols)
+
+> # Extract feature matrices
+> X_emb_train <- train_data[, embedding_cols, drop=FALSE]
+
+> X_bin_train <- train_data[, binary_cols, drop=FALSE]
+
+> X_num_train <- train_data[, numeric_cols, drop=FALSE]
+
+> X_emb_val <- val_data[, embedding_cols, drop=FALSE]
+
+> X_bin_val <- val_data[, binary_cols, drop=FALSE]
+
+> X_num_val <- val_data[, numeric_cols, drop=FALSE]
+
+> X_emb_test <- test_data[, embedding_cols, drop=FALSE]
+
+> X_bin_test <- test_data[, binary_cols, drop=FALSE]
+
+> X_num_test <- test_data[, numeric_cols, drop=FALSE]
+
+> ############################################################
+> # 5. CLASS WEIGHTING
+> ############################################################
+> .... [TRUNCATED] 
+
+> raw_w <- 1 / sqrt(freq)
+
+> w <- raw_w / mean(raw_w)
+
+> class_weights <- as.list(as.numeric(w))
+
+> names(class_weights) <- names(freq)
+
+> ############################################################
+> # 6. FLAGS FOR TUNING
+> ############################################################
+ .... [TRUNCATED] 
+
+> ############################################################
+> # 7. MODEL DEFINITION WITH IMPROVEMENTS
+> ########################################### .... [TRUNCATED] 
+
+> # Calculate embedding dimensions dynamically based on number of categories
+> # Rule: min(50, (n_categories + 1) // 2)
+> emb_dims <- list()
+
+> for (col in embedding_cols) {
++   n_cat <- embedding_info[[col]]$n_cat
++   emb_dim <- as.integer(min(50, ceiling((n_cat + 1) / 2)))
++   emb_dims[[co .... [TRUNCATED] 
+NAME_INCOME_TYPE: 5 categories -> embedding dim = 3
+NAME_EDUCATION_TYPE: 5 categories -> embedding dim = 3
+NAME_FAMILY_STATUS: 5 categories -> embedding dim = 3
+NAME_HOUSING_TYPE: 6 categories -> embedding dim = 4
+OCCUPATION_TYPE: 19 categories -> embedding dim = 10
+
+> # Input layers
+> income_in <- layer_input(shape=1, dtype="int32", name="income_in")
+
+> educ_in   <- layer_input(shape=1, dtype="int32", name="educ_in")
+
+> family_in <- layer_input(shape=1, dtype="int32", name="family_in")
+
+> housing_in<- layer_input(shape=1, dtype="int32", name="housing_in")
+
+> occupation_in <- layer_input(shape=1, dtype="int32", name="occupation_in")
+
+> income_emb <- income_in %>% layer_embedding(
++   input_dim=embedding_info$NAME_INCOME_TYPE$n_cat,
++   output_dim=emb_dims$NAME_INCOME_TYPE) %>% laye .... [TRUNCATED] 
+
+> educ_emb <- educ_in %>% layer_embedding(
++   input_dim=embedding_info$NAME_EDUCATION_TYPE$n_cat,
++   output_dim=emb_dims$NAME_EDUCATION_TYPE) %>% la .... [TRUNCATED] 
+
+> family_emb <- family_in %>% layer_embedding(
++   input_dim=embedding_info$NAME_FAMILY_STATUS$n_cat,
++   output_dim=emb_dims$NAME_FAMILY_STATUS) %>%  .... [TRUNCATED] 
+
+> housing_emb <- housing_in %>% layer_embedding(
++   input_dim=embedding_info$NAME_HOUSING_TYPE$n_cat,
++   output_dim=emb_dims$NAME_HOUSING_TYPE) %>%  .... [TRUNCATED] 
+
+> occupation_emb <- occupation_in %>% layer_embedding(
++   input_dim=embedding_info$OCCUPATION_TYPE$n_cat,
++   output_dim=emb_dims$OCCUPATION_TYPE) %> .... [TRUNCATED] 
+
+> numeric_in <- layer_input(shape=ncol(X_num_train), name="numeric_in")
+
+> binary_in  <- layer_input(shape=ncol(X_bin_train), name="binary_in")
+
+> merged <- layer_concatenate(list(
++   income_emb, educ_emb, family_emb, housing_emb, occupation_emb,
++   numeric_in, binary_in
++ ))
+
+> base_units <- c(1024,768,512,384,256,128,64)
+
+> scaled_units <- as.integer(base_units * FLAGS$width_factor)
+
+> # Deep network with residual connections
+> deep <- merged %>%
++   layer_dense(units=scaled_units[1], activation=FLAGS$act, kernel_regularizer=regula .... [TRUNCATED] 
+
+> # Block 1 with residual
+> block1 <- deep %>%
++   layer_dropout(FLAGS$drop) %>%
++   layer_dense(units=scaled_units[2], activation=FLAGS$act, kernel_r .... [TRUNCATED] 
+
+> deep <- block1 %>%
++   layer_dropout(FLAGS$drop) %>%
++   layer_dense(units=scaled_units[3], activation=FLAGS$act, kernel_regularizer=regularizer_l2( .... [TRUNCATED] 
+
+> # Block 2 with residual
+> block2 <- deep %>%
++   layer_dropout(FLAGS$drop) %>%
++   layer_dense(units=scaled_units[4], activation=FLAGS$act, kernel_r .... [TRUNCATED] 
+
+> deep <- block2 %>%
++   layer_dropout(FLAGS$drop) %>%
++   layer_dense(units=scaled_units[5], activation=FLAGS$act, kernel_regularizer=regularizer_l2( .... [TRUNCATED] 
+
+> # Final layers
+> deep <- deep %>%
++   layer_dropout(FLAGS$drop) %>%
++   layer_dense(units=scaled_units[6], activation=FLAGS$act, kernel_regularizer= .... [TRUNCATED] 
+
+> # No dropout before output layer
+> output <- deep %>% layer_dense(units=num_classes, activation="softmax")
+
+> model_ffn <- keras_model(
++   inputs=list(income_in, educ_in, family_in, housing_in, occupation_in, numeric_in, binary_in),
++   outputs=output
++ )
+
+> model_ffn %>% compile(
++   optimizer = optimizer_nadam(learning_rate=FLAGS$learning_rate, clipnorm=1.0),
++   loss="sparse_categorical_crossentropy", .... [TRUNCATED] 
+
+> ############################################################
+> # 8. CALLBACKS
+> ############################################################
+> 
+> ca .... [TRUNCATED] 
+
+> callback_lr <- callback_reduce_lr_on_plateau(
++   monitor="val_accuracy", 
++   patience=20, 
++   factor=0.5, 
++   min_lr=1e-6,
++   mode="max"
++ )
+
+> # Optional: Checkpoint callback (can be removed since early stopping restores best weights)
+> # Uncomment if you want to save best model to disk dur .... [TRUNCATED] 
+
+> ############################################################
+> # 9. TRAINING
+> ############################################################
+> 
+> # B .... [TRUNCATED] 
+
+> train_inputs <- list(
++   income_in      = make_emb(X_emb_train$NAME_INCOME_TYPE),
++   educ_in        = make_emb(X_emb_train$NAME_EDUCATION_TYPE),
++ .... [TRUNCATED] 
+
+> val_inputs <- list(
++   income_in      = make_emb(X_emb_val$NAME_INCOME_TYPE),
++   educ_in        = make_emb(X_emb_val$NAME_EDUCATION_TYPE),
++   fam .... [TRUNCATED] 
+
+> history_ffn <- model_ffn %>% fit(
++   x = train_inputs, y = y_train,
++   validation_data = list(val_inputs, y_val),
++   epochs = FLAGS$epochs,
++   b .... [TRUNCATED] 
+Warmup: epoch 1, lr = 0.000200
+Warmup: epoch 2, lr = 0.000300
+Warmup: epoch 3, lr = 0.000400
+Warmup: epoch 4, lr = 0.000500
+
+> ############################################################
+> # 10. TEST SET EVALUATION (OPTIONAL - COMMENT OUT FOR EXPERIMENTS)
+> ################ .... [TRUNCATED] 
+
+> # Save preprocessing parameters for inference
+> preprocessing_info <- list(
++   embedding_info = embedding_info,
++   scaling_params = scaling_params .... [TRUNCATED] 
+
+> saveRDS(preprocessing_info, file = file.path(run_dir(), "preprocessing_info.rds"))
+
+> cat("\n=== MODEL AND PREPROCESSING INFO SAVED ===\n")
+
+=== MODEL AND PREPROCESSING INFO SAVED ===
+
+> cat("Model saved to:", file.path(run_dir(), "model.keras"), "\n")
+Model saved to: tuning_ffn_7layer/2025-12-11T23-14-34Z/model.keras 
+
+> cat("Preprocessing info saved to:", file.path(run_dir(), "preprocessing_info.rds"), "\n")
+Preprocessing info saved to: tuning_ffn_7layer/2025-12-11T23-14-34Z/preprocessing_info.rds 

@@ -1,0 +1,271 @@
+
+> ############################################################
+> # nn_experiment.R  (FINAL, FIXED VERSION)
+> # Deep FFN with categorical embeddings fo .... [TRUNCATED] 
+
+> ###############
+> # Libraries
+> ###############
+> if (!require("dplyr"))      install.packages("dplyr");      library(dplyr)
+
+> if (!require("caret"))      install.packages("caret");      library(caret)
+
+> if (!require("keras3"))     install.packages("keras3");     library(keras3)
+
+> if (!require("tensorflow")) install.packages("tensorflow"); library(tensorflow)
+
+> if (!require("tfruns"))     install.packages("tfruns");     library(tfruns)
+
+> ############################################################
+> # 1. DATA LOADING + PREPROCESSING
+> ################################################# .... [TRUNCATED] 
+
+> dataset <- raw
+
+> if ("ID" %in% names(dataset)) {
++   dataset <- dataset |> dplyr::select(-ID)
++ }
+
+> # Replace empty strings with NA
+> for (col in names(dataset)) {
++   if (is.character(dataset[[col]]))
++     dataset[[col]][dataset[[col]] == ""] <-  .... [TRUNCATED] 
+
+> dataset$status <- as.factor(dataset$status)
+
+> # DAYS_EMPLOYED special value
+> dataset$is_unemployed <- ifelse(dataset$DAYS_EMPLOYED == 365243, 1L, 0L)
+
+> dataset$DAYS_EMPLOYED[dataset$DAYS_EMPLOYED == 365243] <- NA
+
+> dataset$AGE            <- abs(dataset$DAYS_BIRTH) / 365
+
+> dataset$YEARS_EMPLOYED <- abs(dataset$DAYS_EMPLOYED) / 365
+
+> dataset <- dataset |> dplyr::select(-DAYS_BIRTH, -DAYS_EMPLOYED)
+
+> dataset$OCCUPATION_TYPE[is.na(dataset$OCCUPATION_TYPE)] <- "Unknown"
+
+> dataset$CNT_FAM_MEMBERS <- pmin(dataset$CNT_FAM_MEMBERS, 10)
+
+> dataset$CNT_CHILDREN    <- pmin(dataset$CNT_CHILDREN, 6)
+
+> dataset$AMT_INCOME_TOTAL <- log1p(dataset$AMT_INCOME_TOTAL)
+
+> if ("FLAG_MOBIL" %in% names(dataset))
++   dataset <- dataset |> dplyr::select(-FLAG_MOBIL)
+
+> ###############
+> # EMBEDDINGS SETUP
+> ###############
+> 
+> embedding_cols <- c(
++   "NAME_INCOME_TYPE",
++   "NAME_EDUCATION_TYPE",
++   "NAME_FAMILY ..." ... [TRUNCATED] 
+
+> binary_cols <- c("CODE_GENDER", "FLAG_OWN_CAR", "FLAG_OWN_REALTY")
+
+> numeric_cols <- setdiff(
++   names(dataset),
++   c(embedding_cols, binary_cols, "status")
++ )
+
+> # Convert embedding columns to 0…(ncat-1)
+> embedding_info <- list()
+
+> for (col in embedding_cols) {
++   dataset[[col]] <- as.factor(dataset[[col]])
++   lvls <- levels(dataset[[col]])
++   dataset[[col]] <- as.integer(da .... [TRUNCATED] 
+
+> # Binary → numeric 0/1
+> dataset$CODE_GENDER    <- ifelse(dataset$CODE_GENDER == "M", 1, 0)
+
+> dataset$FLAG_OWN_CAR   <- ifelse(dataset$FLAG_OWN_CAR == "Y", 1, 0)
+
+> dataset$FLAG_OWN_REALTY<- ifelse(dataset$FLAG_OWN_REALTY == "Y", 1, 0)
+
+> # Median imputation for numerics
+> for (col in numeric_cols) {
++   if (any(is.na(dataset[[col]]))) {
++     med <- median(dataset[[col]], na.rm = TRU .... [TRUNCATED] 
+
+> # FIXED SCALING FUNCTION (correct!)
+> scale_to_zero_one <- function(x) {
++   mn <- min(x, na.rm = TRUE)
++   mx <- max(x, na.rm = TRUE)
++   if (mn == .... [TRUNCATED] 
+
+> dataset[, numeric_cols] <- lapply(dataset[, numeric_cols, drop=FALSE], scale_to_zero_one)
+
+> X_emb <- dataset[, embedding_cols, drop=FALSE]
+
+> X_bin <- dataset[, binary_cols, drop=FALSE]
+
+> X_num <- dataset[, numeric_cols, drop=FALSE]
+
+> y_factor <- dataset$status
+
+> y_num <- as.numeric(y_factor) - 1L
+
+> num_classes <- length(unique(y_num))
+
+> ############################################################
+> # 2. STRATIFIED TRAIN/VAL/TEST SPLIT
+> ############################################## .... [TRUNCATED] 
+
+> train_index <- createDataPartition(y_num, p=0.7, list=FALSE)
+
+> X_emb_train <- X_emb[train_index, ]
+
+> X_bin_train <- X_bin[train_index, ]
+
+> X_num_train <- X_num[train_index, ]
+
+> y_train <- y_num[train_index]
+
+> X_emb_temp <- X_emb[-train_index, ]
+
+> X_bin_temp <- X_bin[-train_index, ]
+
+> X_num_temp <- X_num[-train_index, ]
+
+> y_temp <- y_num[-train_index]
+
+> set.seed(1)
+
+> val_index <- createDataPartition(y_temp, p=0.5, list=FALSE)
+
+> X_emb_val <- X_emb_temp[val_index, ]
+
+> X_bin_val <- X_bin_temp[val_index, ]
+
+> X_num_val <- X_num_temp[val_index, ]
+
+> y_val <- y_temp[val_index]
+
+> X_emb_test <- X_emb_temp[-val_index, ]
+
+> X_bin_test <- X_bin_temp[-val_index, ]
+
+> X_num_test <- X_num_temp[-val_index, ]
+
+> y_test <- y_temp[-val_index]
+
+> ############################################################
+> # 3. CLASS WEIGHTING
+> ############################################################
+> .... [TRUNCATED] 
+
+> raw_w <- 1 / sqrt(freq)
+
+> w <- raw_w / mean(raw_w)
+
+> class_weights <- as.list(as.numeric(w))
+
+> names(class_weights) <- names(freq)
+
+> ############################################################
+> # 4. FLAGS FOR TUNING
+> ############################################################
+ .... [TRUNCATED] 
+
+> ############################################################
+> # 5. MODEL DEFINITION
+> ############################################################
+ .... [TRUNCATED] 
+
+> emb_dims <- list(
++   NAME_INCOME_TYPE = 3L,
++   NAME_EDUCATION_TYPE = 3L,
++   NAME_FAMILY_STATUS = 3L,
++   NAME_HOUSING_TYPE = 3L,
++   OCCUPATION_T .... [TRUNCATED] 
+
+> # Input layers
+> income_in <- layer_input(shape=1, dtype="int32", name="income_in")
+
+> educ_in   <- layer_input(shape=1, dtype="int32", name="educ_in")
+
+> family_in <- layer_input(shape=1, dtype="int32", name="family_in")
+
+> housing_in<- layer_input(shape=1, dtype="int32", name="housing_in")
+
+> occupation_in <- layer_input(shape=1, dtype="int32", name="occupation_in")
+
+> income_emb <- income_in %>% layer_embedding(
++   input_dim=embedding_info$NAME_INCOME_TYPE$n_cat,
++   output_dim=emb_dims$NAME_INCOME_TYPE) %>% laye .... [TRUNCATED] 
+
+> educ_emb <- educ_in %>% layer_embedding(
++   input_dim=embedding_info$NAME_EDUCATION_TYPE$n_cat,
++   output_dim=emb_dims$NAME_EDUCATION_TYPE) %>% la .... [TRUNCATED] 
+
+> family_emb <- family_in %>% layer_embedding(
++   input_dim=embedding_info$NAME_FAMILY_STATUS$n_cat,
++   output_dim=emb_dims$NAME_FAMILY_STATUS) %>%  .... [TRUNCATED] 
+
+> housing_emb <- housing_in %>% layer_embedding(
++   input_dim=embedding_info$NAME_HOUSING_TYPE$n_cat,
++   output_dim=emb_dims$NAME_HOUSING_TYPE) %>%  .... [TRUNCATED] 
+
+> occupation_emb <- occupation_in %>% layer_embedding(
++   input_dim=embedding_info$OCCUPATION_TYPE$n_cat,
++   output_dim=emb_dims$OCCUPATION_TYPE) %> .... [TRUNCATED] 
+
+> numeric_in <- layer_input(shape=ncol(X_num_train), name="numeric_in")
+
+> binary_in  <- layer_input(shape=ncol(X_bin_train), name="binary_in")
+
+> merged <- layer_concatenate(list(
++   income_emb, educ_emb, family_emb, housing_emb, occupation_emb,
++   numeric_in, binary_in
++ ))
+
+> base_units <- c(1024,768,512,384,256,128,64)
+
+> scaled_units <- as.integer(base_units * FLAGS$width_factor)
+
+> deep <- merged %>%
++   layer_dense(units=scaled_units[1], activation=FLAGS$act, kernel_regularizer=regularizer_l2(l2_reg)) %>%
++   layer_batch_norma .... [TRUNCATED] 
+
+> output <- deep %>% layer_dense(units=num_classes, activation="softmax")
+
+> model_ffn <- keras_model(
++   inputs=list(income_in, educ_in, family_in, housing_in, occupation_in, numeric_in, binary_in),
++   outputs=output
++ )
+
+> model_ffn %>% compile(
++   optimizer = optimizer_nadam(learning_rate=FLAGS$learning_rate),
++   loss="sparse_categorical_crossentropy",
++   metrics=" ..." ... [TRUNCATED] 
+
+> ############################################################
+> # 6. TRAINING
+> ############################################################
+> 
+> cal .... [TRUNCATED] 
+
+> callback_lr <- callback_reduce_lr_on_plateau(monitor="val_loss", patience=20, factor=0.5, min_lr=1e-6)
+
+> # Build correct 2D matrices for embedding inputs
+> make_emb <- function(x) matrix(x, ncol=1)
+
+> train_inputs <- list(
++   income_in      = make_emb(X_emb_train$NAME_INCOME_TYPE),
++   educ_in        = make_emb(X_emb_train$NAME_EDUCATION_TYPE),
++ .... [TRUNCATED] 
+
+> val_inputs <- list(
++   income_in      = make_emb(X_emb_val$NAME_INCOME_TYPE),
++   educ_in        = make_emb(X_emb_val$NAME_EDUCATION_TYPE),
++   fam .... [TRUNCATED] 
+
+> history_ffn <- model_ffn %>% fit(
++   x = train_inputs, y = y_train,
++   validation_data = list(val_inputs, y_val),
++   epochs = FLAGS$epochs,
++   b .... [TRUNCATED] 

@@ -1,0 +1,284 @@
+
+> ############################################################
+> # nn_experiment.R
+> # Feed-forward neural network for Assignment 2
+> # - full preproc .... [TRUNCATED] 
+
+> ###############
+> # Libraries
+> ###############
+> if (!require("dplyr"))      install.packages("dplyr");      library(dplyr)
+
+> if (!require("caret"))      install.packages("caret");      library(caret)
+
+> if (!require("keras3"))     install.packages("keras3");     library(keras3)
+
+> if (!require("tensorflow")) install.packages("tensorflow"); library(tensorflow)
+
+> if (!require("tfruns"))     install.packages("tfruns");     library(tfruns)
+
+> if (!require("fastDummies")) install.packages("fastDummies"); library(fastDummies)
+
+> ############################################################
+> # 1. Data loading and preprocessing
+> ############################################### .... [TRUNCATED] 
+
+> dataset <- raw
+
+> if ("ID" %in% names(dataset)) {
++   dataset <- dataset %>% dplyr::select(-ID)
++ }
+
+> # Step 2: Replace empty strings in character columns with NA
+> for (col in names(dataset)) {
++   if (is.character(dataset[[col]])) {
++     dataset[[ .... [TRUNCATED] 
+
+> # Step 3: Convert target column 'status' to factor
+> dataset$status <- as.factor(dataset$status)
+
+> # Step 4: Handle special placeholder in DAYS_EMPLOYED (365243 = unemployed)
+> dataset$is_unemployed <- ifelse(dataset$DAYS_EMPLOYED == 365243, 1, 0)
+
+> dataset$DAYS_EMPLOYED[dataset$DAYS_EMPLOYED == 365243] <- NA
+
+> # Step 5: Create age and years employed (in years)
+> dataset$AGE            <- abs(dataset$DAYS_BIRTH) / 365
+
+> dataset$YEARS_EMPLOYED <- abs(dataset$DAYS_EMPLOYED) / 365
+
+> # Remove original day-based columns
+> dataset <- dataset %>% dplyr::select(-DAYS_BIRTH, -DAYS_EMPLOYED)
+
+> # Step 6: Treat missing OCCUPATION_TYPE as its own category
+> dataset$OCCUPATION_TYPE[is.na(dataset$OCCUPATION_TYPE)] <- "Unknown"
+
+> # Step 7: Cap extreme values in family members and children
+> dataset$CNT_FAM_MEMBERS <- pmin(dataset$CNT_FAM_MEMBERS, 10)
+
+> dataset$CNT_CHILDREN    <- pmin(dataset$CNT_CHILDREN, 6)
+
+> # Step 8: Log-transform income to reduce skewness
+> dataset$AMT_INCOME_TOTAL <- log1p(dataset$AMT_INCOME_TOTAL)
+
+> # Step 9: Remove uninformative constant feature FLAG_MOBIL (always 1)
+> if ("FLAG_MOBIL" %in% names(dataset)) {
++   dataset <- dataset %>% dplyr::se .... [TRUNCATED] 
+
+> # Step 10: Separate predictors and target
+> # features <- dataset %>% dplyr::select(-status)
+> 
+> # Step 11: Encode character predictors as numeric  .... [TRUNCATED] 
+
+> # identify categorical columns (character or factor), except target
+> cat_cols <- names(dataset)[sapply(dataset, is.character) | sapply(dataset, is. .... [TRUNCATED] 
+
+> cat_cols <- setdiff(cat_cols, "status")
+
+> # Step 11: Dummy encode categorical predictors (one-hot)
+> dataset_dummies <- fastDummies::dummy_cols(
++   dataset,
++   select_columns = cat_cols,
++ .... [TRUNCATED] 
+
+> # Step 12: Separate predictors and target again
+> features <- dataset_dummies %>% dplyr::select(-status)
+
+> # Step 13: Median imputation for remaining numeric NAs
+> for (col in names(features)) {
++   if (is.numeric(features[[col]])) {
++     if (any(is.na(f .... [TRUNCATED] 
+
+> # Step 14: Scale all numeric predictors to [0,1]
+> scale_to_zero_one <- function(x) {
++   if (!is.numeric(x)) return(x)
++   if (all(is.na(x)))  retu .... [TRUNCATED] 
+
+> features_scaled <- as.data.frame(lapply(features, scale_to_zero_one))
+
+> features_scaled_num <- as.data.frame(lapply(features_scaled, as.numeric))
+
+> # Final x and y
+> x <- data.matrix(features_scaled_num)
+
+> y_factor <- dataset_dummies$status
+
+> y_num <- as.numeric(y_factor) - 1
+
+> num_classes <- length(unique(y_num))
+
+> ############################################################
+> # 2. Train / validation / test split (stratified)
+> ################################# .... [TRUNCATED] 
+
+> train_index <- createDataPartition(y_num, p = 0.7, list = FALSE)
+
+> x_train <- x[train_index, ]
+
+> y_train <- y_num[train_index]
+
+> x_temp <- x[-train_index, ]
+
+> y_temp <- y_num[-train_index]
+
+> set.seed(1)
+
+> val_index <- createDataPartition(y_temp, p = 0.5, list = FALSE)
+
+> x_val <- x_temp[val_index, ]
+
+> y_val <- y_temp[val_index]
+
+> x_test <- x_temp[-val_index, ]
+
+> y_test <- y_temp[-val_index]
+
+> ############################################################
+> # 3. Class weights to handle imbalance
+> ############################################ .... [TRUNCATED] 
+
+> raw_w <- 1 / sqrt(freq)      # softer than 1/freq
+
+> w <- raw_w / mean(raw_w)     # normalise around 1
+
+> class_weights <- as.list(as.numeric(w))
+
+> names(class_weights) <- names(freq)
+
+> print(class_weights)
+$`0`
+[1] 0.1102361
+
+$`1`
+[1] 0.3121624
+
+$`2`
+[1] 0.9365901
+
+$`3`
+[1] 1.884386
+
+$`4`
+[1] 2.536298
+
+$`5`
+[1] 1.29665
+
+$`6`
+[1] 0.5911844
+
+$`7`
+[1] 0.3324927
+
+
+> ############################################################
+> # 4. Hyperparameters via FLAGS (for tfruns::tuning_run)
+> ########################### .... [TRUNCATED] 
+
+> ############################################################
+> # 5. Model definition (feed-forward network)
+> ###################################### .... [TRUNCATED] 
+
+> # Helper block
+> build_block <- function(model, units, act, dropout) {
++   model %>%
++     layer_dense(
++       units = units,
++       activation =  .... [TRUNCATED] 
+
+> # Base architecture (scaled by width_factor)
+> base_units <- c(1024, 768, 512, 384, 256, 128, 64)
+
+> scaled_units <- as.integer(base_units * FLAGS$width_factor)
+
+> model_ffn <- keras_model_sequential() %>%
++   
++   # Input block
++   layer_dense(
++     units = scaled_units[1],
++     activation = FLAGS$act,
++     .... [TRUNCATED] 
+
+> model_ffn %>% compile(
++   optimizer = optimizer_nadam(learning_rate = FLAGS$learning_rate),
++   loss      = "sparse_categorical_crossentropy",
++    .... [TRUNCATED] 
+
+> summary(model_ffn)
+Model: "sequential"
+┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━┳━━━━━━━━━┓
+┃ Layer (type)                          ┃ Output Shape                  ┃        Param # ┃ Traina… ┃
+┡━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━╇━━━━━━━━━┩
+│ dense (Dense)                         │ (None, 512)                   │         24,576 │    Y    │
+├───────────────────────────────────────┼───────────────────────────────┼────────────────┼─────────┤
+│ batch_normalization                   │ (None, 512)                   │          2,048 │    Y    │
+│ (BatchNormalization)                  │                               │                │         │
+├───────────────────────────────────────┼───────────────────────────────┼────────────────┼─────────┤
+│ dropout (Dropout)                     │ (None, 512)                   │              0 │    -    │
+├───────────────────────────────────────┼───────────────────────────────┼────────────────┼─────────┤
+│ dense_1 (Dense)                       │ (None, 384)                   │        196,992 │    Y    │
+├───────────────────────────────────────┼───────────────────────────────┼────────────────┼─────────┤
+│ batch_normalization_1                 │ (None, 384)                   │          1,536 │    Y    │
+│ (BatchNormalization)                  │                               │                │         │
+├───────────────────────────────────────┼───────────────────────────────┼────────────────┼─────────┤
+│ dropout_1 (Dropout)                   │ (None, 384)                   │              0 │    -    │
+├───────────────────────────────────────┼───────────────────────────────┼────────────────┼─────────┤
+│ dense_2 (Dense)                       │ (None, 256)                   │         98,560 │    Y    │
+├───────────────────────────────────────┼───────────────────────────────┼────────────────┼─────────┤
+│ batch_normalization_2                 │ (None, 256)                   │          1,024 │    Y    │
+│ (BatchNormalization)                  │                               │                │         │
+├───────────────────────────────────────┼───────────────────────────────┼────────────────┼─────────┤
+│ dropout_2 (Dropout)                   │ (None, 256)                   │              0 │    -    │
+├───────────────────────────────────────┼───────────────────────────────┼────────────────┼─────────┤
+│ dense_3 (Dense)                       │ (None, 192)                   │         49,344 │    Y    │
+├───────────────────────────────────────┼───────────────────────────────┼────────────────┼─────────┤
+│ batch_normalization_3                 │ (None, 192)                   │            768 │    Y    │
+│ (BatchNormalization)                  │                               │                │         │
+├───────────────────────────────────────┼───────────────────────────────┼────────────────┼─────────┤
+│ dropout_3 (Dropout)                   │ (None, 192)                   │              0 │    -    │
+├───────────────────────────────────────┼───────────────────────────────┼────────────────┼─────────┤
+│ dense_4 (Dense)                       │ (None, 128)                   │         24,704 │    Y    │
+├───────────────────────────────────────┼───────────────────────────────┼────────────────┼─────────┤
+│ batch_normalization_4                 │ (None, 128)                   │            512 │    Y    │
+│ (BatchNormalization)                  │                               │                │         │
+├───────────────────────────────────────┼───────────────────────────────┼────────────────┼─────────┤
+│ dropout_4 (Dropout)                   │ (None, 128)                   │              0 │    -    │
+├───────────────────────────────────────┼───────────────────────────────┼────────────────┼─────────┤
+│ dense_5 (Dense)                       │ (None, 64)                    │          8,256 │    Y    │
+├───────────────────────────────────────┼───────────────────────────────┼────────────────┼─────────┤
+│ batch_normalization_5                 │ (None, 64)                    │            256 │    Y    │
+│ (BatchNormalization)                  │                               │                │         │
+├───────────────────────────────────────┼───────────────────────────────┼────────────────┼─────────┤
+│ dropout_5 (Dropout)                   │ (None, 64)                    │              0 │    -    │
+├───────────────────────────────────────┼───────────────────────────────┼────────────────┼─────────┤
+│ dense_6 (Dense)                       │ (None, 32)                    │          2,080 │    Y    │
+├───────────────────────────────────────┼───────────────────────────────┼────────────────┼─────────┤
+│ batch_normalization_6                 │ (None, 32)                    │            128 │    Y    │
+│ (BatchNormalization)                  │                               │                │         │
+├───────────────────────────────────────┼───────────────────────────────┼────────────────┼─────────┤
+│ dropout_6 (Dropout)                   │ (None, 32)                    │              0 │    -    │
+├───────────────────────────────────────┼───────────────────────────────┼────────────────┼─────────┤
+│ dense_7 (Dense)                       │ (None, 8)                     │            264 │    Y    │
+└───────────────────────────────────────┴───────────────────────────────┴────────────────┴─────────┘
+ Total params: 411,048 (1.57 MB)
+ Trainable params: 407,912 (1.56 MB)
+ Non-trainable params: 3,136 (12.25 KB)
+
+> ############################################################
+> # 6. Training with early stopping + LR scheduling
+> ################################# .... [TRUNCATED] 
+
+> callback_lr <- callback_reduce_lr_on_plateau(
++   monitor  = "val_loss",  # watch validation loss
++   factor   = 0.5,         # multiply lr by 0.5 w .... [TRUNCATED] 
+
+> history_ffn <- model_ffn %>% fit(
++   x_train,
++   y_train,
++   epochs          = FLAGS$epochs,
++   batch_size      = FLAGS$batch_size,
++   validati .... [TRUNCATED] 
+
+> ############################################################
+> # 7. Evaluation on test set (DISABLED DURING TUNING)
+> ############################## .... [TRUNCATED] 
