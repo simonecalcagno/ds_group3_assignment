@@ -1,8 +1,0 @@
-{
-  "learning_rate": 0.001,
-  "batch_size": 256,
-  "width_factor": 1,
-  "drop": 0.1,
-  "act": "gelu",
-  "epochs": 1000
-}
