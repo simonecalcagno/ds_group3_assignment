@@ -1,340 +1,300 @@
-# Seed for reproducibility
+################################################################################
+# nn_experiment.R
+# Feed-forward neural network for Assignment 2
+# - full preprocessing (capping, Unknown occupation, etc.)
+# - class weighting for imbalance
+# - FLAGS for tfruns::tuning_run()
+################################################################################
+
 set.seed(1)
 
-# Load required packages
-if(!require('tidyverse')) {             
-  install.packages('tidyverse')
-  library('tidyverse')
-}
+################################################################################
+# Libraries
+################################################################################
 
-if(!require('caret')) {             
-  install.packages('caret')
-  library('caret')
-}
+if (!require("dplyr")) install.packages("dplyr")
+library(dplyr)
 
-if(!require('janitor')) {             
-  install.packages('janitor')
-  library('janitor')
-}
+if (!require("caret")) install.packages("caret")
+library(caret)
 
-if(!require('skimr')) {             
-  install.packages('skimr')
-  library('skimr')
-}
+if (!require("keras3")) install.packages("keras3")
+library(keras3)
 
-if(!require('keras3')) {
-  install.packages('keras3')
-  library('keras3')
-}
+if (!require("tensorflow")) install.packages("tensorflow")
+library(tensorflow)
 
-if(!require('tensorflow')) {
-  install.packages('tensorflow')
-  library('tensorflow')
-}
+if (!require("tfruns")) install.packages("tfruns")
+library(tfruns)
 
-if(!require('tfruns')) {
-  install.packages('tfruns')
-  library('tfruns')
-} else {
-  library('tfruns')
-}
+if (!require("fastDummies")) install.packages("fastDummies")
+library(fastDummies)
 
-# tensorflow::install_tensorflow() 
-# Run the line above once manually if tensorflow backend is not installed
+################################################################################
+# 1. Data loading and preprocessing (no leakage)
+################################################################################
 
-
-############################################
-# Data loading and preparation
-############################################
-
-# Step 1 Load raw data and remove technical ID column
-# What  Read the original data from csv and drop ID which does not contain predictive information
+# Step 1: Load raw data and remove technical ID column
 raw <- read.csv("Dataset-part-2.csv", stringsAsFactors = FALSE)
-if("ID" %in% names(raw)) {
-  dataset <- raw %>% dplyr::select(-ID)
+dataset <- raw
+
+if ("ID" %in% names(dataset)) {
+  dataset <- dataset %>% select(-ID)
 }
 
-# Step 2 Clean character columns by replacing empty strings with NA
-# What  Replace empty text cells with proper NA so that missing value handling works correctly
-for(col in names(dataset)) {
-  if(is.character(dataset[[col]])) {
+# Step 2: Replace empty strings in character columns with NA
+for (col in names(dataset)) {
+  if (is.character(dataset[[col]])) {
     dataset[[col]][dataset[[col]] == ""] <- NA
   }
 }
 
-# Step 3 Convert target column status to factor
-# What  Status is the class label and must be a factor before encoding and modeling
-dataset$status <- as.factor(dataset$status)
+# Step 3: Target as factor (fix levels once)
+dataset$status <- factor(dataset$status)
+status_levels <- levels(dataset$status)
 
-# Step 4 Handle special placeholder values in DAYS_EMPLOYED
-# What  Value 365243 indicates unemployed  create a flag and replace placeholder with NA
-dataset$is_unemployed <- ifelse(dataset$DAYS_EMPLOYED == 365243, 1, 0)
+# Step 4: Handle special placeholder in DAYS_EMPLOYED
+dataset$is_unemployed <- ifelse(dataset$DAYS_EMPLOYED == 365243, 1L, 0L)
 dataset$DAYS_EMPLOYED[dataset$DAYS_EMPLOYED == 365243] <- NA
 
-# Step 5 Create more interpretable age and employment duration features
-# What  Convert days to years for better scale and interpretation
-dataset$AGE <- abs(dataset$DAYS_BIRTH) / 365
+# Step 5: Create age and years employed (in years)
+dataset$AGE_YEARS <- abs(dataset$DAYS_BIRTH) / 365
 dataset$YEARS_EMPLOYED <- abs(dataset$DAYS_EMPLOYED) / 365
 
-# Optionally remove original day based columns to avoid redundancy
-dataset <- dataset %>% dplyr::select(-DAYS_BIRTH, -DAYS_EMPLOYED)
+# Optional caps (outlier capping)
+dataset$AGE_YEARS <- pmin(dataset$AGE_YEARS, 90)
+dataset$YEARS_EMPLOYED <- pmin(dataset$YEARS_EMPLOYED, 60)
 
-# Step 6 Treat missing values in OCCUPATION_TYPE as a separate category
-# What  NA in occupation often means no formal occupation  this is informative and should be kept as own group
+# Remove original day-based columns
+dataset <- dataset %>% select(-DAYS_BIRTH, -DAYS_EMPLOYED)
+
+# Step 6: Treat missing OCCUPATION_TYPE as its own category
 dataset$OCCUPATION_TYPE[is.na(dataset$OCCUPATION_TYPE)] <- "Unknown"
 
-# Step 7 Cap extreme values in CNT_FAM_MEMBERS and CHilDREN
-# What  Limit unrealistic high family sizes to reduce influence of outliers
+# Step 7: Cap extreme values
 dataset$CNT_FAM_MEMBERS <- pmin(dataset$CNT_FAM_MEMBERS, 10)
 dataset$CNT_CHILDREN <- pmin(dataset$CNT_CHILDREN, 6)
 
-
-# Step 8 Apply log transform to income to reduce skewness
-# What  Income distribution is heavy tailed  log transform makes it more suitable for neural networks
-dataset$AMT_INCOME_TOTAL <- log1p(dataset$AMT_INCOME_TOTAL)
-
-
-# Step 11 Remove uninformative constant feature FLAG_MOBIL
-# What  FLAG_MOBIL is always one in this dataset and does not help prediction
-if("FLAG_MOBIL" %in% names(dataset)) {
-  dataset <- dataset %>% dplyr::select(-FLAG_MOBIL)
+# Step 9: Remove uninformative constant feature
+if ("FLAG_MOBIL" %in% names(dataset)) {
+  dataset <- dataset %>% select(-FLAG_MOBIL)
 }
 
-# Step 12 Separate predictors and target
-# What  Split data into features for input and status as output label
-features <- dataset %>% dplyr::select(-status)
+# Step 10: Dummy encoding
+dataset$status <- factor(dataset$status, levels = status_levels)
 
-# Step 13 Encode character predictors as numeric codes
-# What  Neural networks require numeric input  convert each category to an integer code
-for(col in names(features)) {
-  if(is.character(features[[col]])) {
-    features[[col]] <- as.numeric(as.factor(features[[col]]))
-  }
-}
+cat_cols <- names(dataset)[sapply(dataset, is.character) | sapply(dataset, is.factor)]
+cat_cols <- setdiff(cat_cols, "status")
 
-# Step 14 Impute remaining numeric missing values with median
-# What  Neural networks cannot handle NA  use simple and robust median imputation per column
-for(col in names(features)) {
-  if(is.numeric(features[[col]])) {
-    if(any(is.na(features[[col]]))) {
-      med <- median(features[[col]], na.rm = TRUE)
-      if(is.na(med)) {
-        features[[col]] <- 0
-      } else {
-        features[[col]][is.na(features[[col]])] <- med
-      }
-    }
-  }
-}
+dataset_dummies <- fastDummies::dummy_cols(
+  dataset,
+  select_columns = cat_cols,
+  remove_first_dummy = TRUE,
+  remove_selected_columns = TRUE
+)
 
-# Step 15 Scale all numeric predictors to range zero to one
-# What  Scaling stabilizes training of neural networks and makes features comparable
-scale_to_zero_one <- function(x) {
-  if(is.numeric(x)) {
-    if(all(is.na(x))) {
-      return(rep(0, length(x)))
-    }
-    mn <- min(x, na.rm = TRUE)
-    mx <- max(x, na.rm = TRUE)
-    if(mn == mx) {
-      return(rep(0, length(x)))
-    }
-    scaled <- (x - mn) / (mx - mn)
-    scaled[is.na(scaled)] <- 0
-    scaled[is.infinite(scaled)] <- 0
-    return(scaled)
-  } else {
-    return(x)
-  }
-}
+features <- dataset_dummies %>% select(-status)
+y_factor <- dataset_dummies$status
+y_num <- as.numeric(y_factor) - 1L
+num_classes <- length(unique(y_num))
 
-features_scaled <- as.data.frame(lapply(features, scale_to_zero_one))
-
-# Ensure numeric type for all predictors
-features_scaled_num <- as.data.frame(lapply(features_scaled, function(col) {
-  as.numeric(col)
-}))
-
-# Step 16 Create final input matrix x and numeric target vector y
-# What  Prepare data in matrix form with integer class labels for keras sparse categorical loss
-x <- data.matrix(features_scaled_num)
-y_factor <- dataset$status
-y_num <- as.numeric(y_factor) - 1
-
-# Optional sanity checks
-summary(x)
-any(is.na(x))
-table(y_num)
-
-# Step 17 Create train validation test split
-# What  Split the data to evaluate training performance and generalization
+################################################################################
+# 2. Train / validation / test split (stratified)
+################################################################################
 
 set.seed(1)
 train_index <- createDataPartition(y_num, p = 0.7, list = FALSE)
 
-x_train <- x[train_index, ]
+x_all <- data.matrix(features)
+
+x_train_raw <- x_all[train_index, , drop = FALSE]
 y_train <- y_num[train_index]
 
-x_temp <- x[-train_index, ]
+x_temp_raw <- x_all[-train_index, , drop = FALSE]
 y_temp <- y_num[-train_index]
 
 set.seed(1)
 val_index <- createDataPartition(y_temp, p = 0.5, list = FALSE)
 
-x_val <- x_temp[val_index, ]
+x_val_raw <- x_temp_raw[val_index, , drop = FALSE]
 y_val <- y_temp[val_index]
 
-x_test <- x_temp[-val_index, ]
+x_test_raw <- x_temp_raw[-val_index, , drop = FALSE]
 y_test <- y_temp[-val_index]
 
-# Sanity check sizes
-dim(x_train); length(y_train)
-dim(x_val); length(y_val)
-dim(x_test); length(y_test)
+################################################################################
+# 3. Imputation + scaling using TRAIN statistics only
+################################################################################
 
-############################################
-# Simple neural network as starting point
-############################################
+# 3.1 Median imputation
+medians <- apply(x_train_raw, 2, function(v) {
+  m <- median(v, na.rm = TRUE)
+  if (is.na(m)) 0 else m
+})
 
-# Step 19 Determine number of classes for softmax output
-# What  Count unique class labels in y for the output layer size
-num_classes <- length(unique(y_num))
+impute_median <- function(mat, med) {
+  for (j in seq_len(ncol(mat))) {
+    idx_na <- is.na(mat[, j])
+    if (any(idx_na)) {
+      mat[idx_na, j] <- med[j]
+    }
+  }
+  mat
+}
 
-# Step 20 Define a simple baseline neural network model
-# What  One hidden layer with relu and softmax output for multi class classification
+x_train_imp <- impute_median(x_train_raw, medians)
+x_val_imp   <- impute_median(x_val_raw, medians)
+x_test_imp  <- impute_median(x_test_raw, medians)
 
-model_simple <- keras_model_sequential() %>%
+# 3.2 Min–max scaling
+mins <- apply(x_train_imp, 2, min)
+maxs <- apply(x_train_imp, 2, max)
+
+same <- which(maxs == mins)
+maxs[same] <- mins[same] + 1
+
+scale_minmax <- function(mat, mins, maxs) {
+  scaled <- sweep(mat, 2, mins, "-")
+  sweep(scaled, 2, (maxs - mins), "/")
+}
+
+x_train_scaled <- scale_minmax(x_train_imp, mins, maxs)
+x_val  <- scale_minmax(x_val_imp, mins, maxs)
+x_test <- scale_minmax(x_test_imp, mins, maxs)
+
+################################################################################
+# 3.3 Oversampling (train + validation only)
+################################################################################
+
+################################################################################
+# 3.3 Oversampling (TRAIN + VALIDATION combined)
+################################################################################
+
+# Combine train + validation
+x_trainval_scaled <- rbind(x_train_scaled, x_val)
+y_trainval <- c(y_train, y_val)
+
+train_df <- as.data.frame(x_trainval_scaled)
+train_df$status <- factor(y_trainval)
+
+tab <- table(train_df$status)
+prop <- tab / sum(tab)
+
+target_ratio <- 0.15
+minor_threshold <- 0.08
+max_dup_factor <- 5
+
+majority_class <- names(tab)[which.max(tab)]
+majority_n <- max(tab)
+
+resampled_idx <- integer(0)
+
+for (cl in names(tab)) {
+  idx <- which(train_df$status == cl)
+  n_cl <- length(idx)
+  p_cl <- prop[cl]
+  
+  if (cl == majority_class || p_cl >= minor_threshold) {
+    resampled_idx <- c(resampled_idx, idx)
+  } else {
+    target_n <- min(as.integer(target_ratio * majority_n), n_cl * max_dup_factor)
+    extra_idx <- sample(idx, size = max(0, target_n - n_cl), replace = TRUE)
+    resampled_idx <- c(resampled_idx, idx, extra_idx)
+  }
+}
+
+resampled_idx <- sample(resampled_idx)
+
+x_train <- x_trainval_scaled[resampled_idx, , drop = FALSE]
+y_train <- as.numeric(train_df$status[resampled_idx]) - 1L
+
+################################################################################
+# 4. Remove constant columns
+################################################################################
+
+const_cols <- which(maxs == mins)
+if (length(const_cols) > 0) {
+  x_train <- x_train[, -const_cols, drop = FALSE]
+  x_val   <- x_val[, -const_cols, drop = FALSE]
+  x_test  <- x_test[, -const_cols, drop = FALSE]
+}
+
+################################################################################
+# 6. Model definition
+################################################################################
+
+model_ffn <- keras_model_sequential() %>%
   layer_dense(
-    units = 32,
+    units = 512,
     activation = "relu",
     input_shape = ncol(x_train)
   ) %>%
-  layer_dense(
-    units = num_classes,
-    activation = "softmax"
-  )
+  layer_dropout(rate = 0.3) %>%
+  layer_dense(units = 256, activation = "relu") %>%
+  layer_dropout(rate = 0.2) %>%
+  layer_dense(units = 128, activation = "relu") %>%
+  layer_dropout(rate = 0.1) %>%
+  layer_dense(units = num_classes, activation = "softmax")
 
-# Step 21 Compile the model
-# What  Use Adam optimizer and sparse categorical crossentropy for integer class labels
+y_train_cat <- to_categorical(y_train, num_classes)
+y_val_cat   <- to_categorical(y_val, num_classes)
 
-model_simple %>% compile(
-  optimizer = optimizer_adam(learning_rate = 0.001),
-  loss = "sparse_categorical_crossentropy",
+model_ffn %>% compile(
+  optimizer = optimizer_sgd(learning_rate = 0.05),
+  loss = "categorical_crossentropy",
   metrics = "accuracy"
 )
 
-# Optional show model summary
-summary(model_simple)
+summary(model_ffn)
 
-# Step 22 Train the simple model
-# What  Fit the model on training data and monitor validation accuracy
+################################################################################
+# 7. Training
+################################################################################
 
-history_simple <- model_simple %>% fit(
-  x_train,
-  y_train,
-  epochs = 30,
-  batch_size = 5016,
-  validation_data = list(x_val, y_val),
+
+callback_lr <- callback_reduce_lr_on_plateau(
+  monitor = "loss",
+  factor = 0.5,
+  patience = 50,
+  min_lr = 1e-4,
   verbose = 1
 )
 
-# Optional plot training history
-plot(history_simple)
-
-# Step 23 Evaluate the model on test data
-# What  Test set accuracy is used to judge baseline model quality
-
-test_results_simple <- model_simple %>% evaluate(
-  x_test,
-  y_test,
-  verbose = 0
-)
-
-print(test_results_simple)
-
-# Step 24 Save the trained simple model for later comparison and reality check
-save_model(
-  model_simple,
-  overwrite = TRUE, 
-  "nn_simple_assignment2.keras"
-)
-
-############################################
-# User defined deep neural network model
-############################################
-
-# Determine number of classes
-# What  Use the unique labels in y for output units
-num_classes <- length(unique(y_num))
-
-# Define the model architecture
-# What  Several dense layers with tanh and sigmoid activations plus dropout for regularization
-model_cnn <- keras_model_sequential() %>%
-  layer_dense(
-    units = 128,
-    activation = "tanh",
-    input_shape = ncol(x_train)
-  ) %>%
-  layer_dense(
-    units = 128,
-    activation = "sigmoid"
-  ) %>%
-  layer_dropout(rate = 0.1) %>%
-  layer_dense(
-    units = 128,
-    activation = "tanh"
-  ) %>%
-  layer_dropout(rate = 0.1) %>%
-  layer_dense(
-    units = 128,
-    activation = "sigmoid"
-  ) %>%
-  layer_dropout(rate = 0.1) %>%
-  layer_dense(
-    units = num_classes,
-    activation = "softmax"
-  )
-
-# Compile the model
-# What  Use Adam optimizer and sparse categorical crossentropy for integer encoded labels
-model_cnn %>% compile(
-  optimizer = optimizer_adam(learning_rate = 0.001),
-  loss      = "sparse_categorical_crossentropy",
-  metrics   = "accuracy"
-)
-
-# Optional  show model summary
-summary(model_cnn)
-
-# Train the model
-# What  Fit the model on training data and monitor performance on validation set
-history_cnn <- model_cnn %>% fit(
+history_ffn <- model_ffn %>% fit(
   x_train,
-  y_train,
-  epochs          = 1000,
-  batch_size      = 512,
-  validation_data = list(x_val, y_val),
-  verbose         = 1
+  y_train_cat,
+  epochs = 3000,
+  batch_size = 128,
+  callbacks = list(callback_lr),
+  verbose = 2
 )
 
-# Optional  plot training history
-plot(history_cnn)
+################################################################################
+# 9. Save model
+################################################################################
 
-# Evaluate the model on test data
-# What  Test accuracy used to compare with other models
-test_results_cnn <- model_cnn %>% evaluate(
+save_model(
+  model_ffn,
+  filepath = file.path("final_model_ass2_group3.keras"),
+  overwrite = TRUE
+)
+
+################################################################################
+# 10. FINAL TEST SET EVALUATION (RUN ONCE)
+################################################################################
+
+scores <- model_ffn %>% evaluate(
   x_test,
-  y_test,
+  to_categorical(y_test, num_classes),
   verbose = 0
 )
 
-print(test_results_cnn)
+print(scores) 
 
-# Save the trained model
-save_model(
-  model_cnn,
-  overwrite = TRUE,
-  "nn_cnn_assignment2.keras"
-)
+# robust extraction
+test_loss <- if (is.list(scores)) scores$loss else as.numeric(scores[[1]])
+test_acc  <- if (is.list(scores)) scores$accuracy else as.numeric(scores[[2]])
 
-
+cat("\n================ FINAL TEST RESULTS ================\n")
+cat("Test loss     :", round(test_loss, 4), "\n")
+cat("Test accuracy :", round(test_acc, 4), "\n")

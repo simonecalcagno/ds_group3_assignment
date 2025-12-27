@@ -1,0 +1,7 @@
+{
+  "learning_rate": 0.05,
+  "batch_size": 128,
+  "act": "relu",
+  "epochs": 5000,
+  "l2_reg": 1e-05
+}

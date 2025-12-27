@@ -11,38 +11,27 @@ library(tfruns)
 
 runs <- tuning_run(
   "nn_experiment.R",
-  runs_dir = "tuning_ffn_4layer1412_3",
+  runs_dir = "tuning_sgd_3layer2712",
   sample   = 1.0,  # Run all combinations (20 total)
   flags = list(
     # Optimizer hyperparameters
-    learning_rate = c(0.05,0.1),      # 2 options
-    batch_size    = c(128,512,64),    
+    learning_rate = c(0.05),      # 2 options
+    batch_size    = c(128),    
     l2_reg        = c(0.00001),# 1 option (fixed)
     
-    #Units
-    u1 = c(512,256),
-    u2 = c(512,128),
-    u3 = c(128,64),
-  
+    
     # Architecture scaling factor
     #width_factor  = c(1.5),          # 2 options
     
     # Activation function
     act = c("relu"),                 # 2 options
     
-    # Dropout rate
-    drop1 = c(0.5,0.3,0),
-    drop2= c(0.2,0),
-    drop3= c(0.2,0),# 3 options
     
     # Training epochs
     epochs = 5000  # Let early stopping handle this
   )
 )
 
-# Total combinations: 2 × 1 × 2 × 2 × 3 = 24 runs
-# With sample=1.0, all 24 will run
-# If you want exactly 20, set sample = 20/24 ≈ 0.83
 
 ############################################################
 # Analyze Results - Sort by Validation Accuracy
@@ -153,30 +142,6 @@ best_config <- list(
 saveRDS(best_config, "best_hyperparameters.rds")
 cat("\nBest configuration saved to: best_hyperparameters.rds\n")
 
-############################################################
-# Visualize Results (if you want)
-############################################################
-
-# Uncomment to create plots
-# library(ggplot2)
-# 
-# # Plot: Dropout vs Validation AUC
-# ggplot(runs %>% as.data.frame(), aes(x = factor(flag_drop), y = metric_val_auc)) +
-#   geom_boxplot() +
-#   labs(title = "Dropout Rate vs Validation AUC", x = "Dropout", y = "Val AUC") +
-#   theme_minimal()
-# 
-# # Plot: Width Factor vs Validation AUC
-# ggplot(runs %>% as.data.frame(), aes(x = factor(flag_width_factor), y = metric_val_auc)) +
-#   geom_boxplot() +
-#   labs(title = "Width Factor vs Validation AUC", x = "Width Factor", y = "Val AUC") +
-#   theme_minimal()
-# 
-# # Plot: Learning Rate vs Validation AUC
-# ggplot(runs %>% as.data.frame(), aes(x = factor(flag_learning_rate), y = metric_val_auc)) +
-#   geom_boxplot() +
-#   labs(title = "Learning Rate vs Validation AUC", x = "Learning Rate", y = "Val AUC") +
-#   theme_minimal()
 
 ############################################################
 # Load and Evaluate Best Model on Test Set
